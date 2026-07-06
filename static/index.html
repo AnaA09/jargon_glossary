@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Translate government procurement jargon into plain English.">
+  <title>ClearTerms — RFP Jargon Glossary</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="ClearTerms home">
+      <span class="brand-mark" aria-hidden="true">C</span>
+      <span>ClearTerms</span>
+    </a>
+    <span class="status"><i></i> Ready to analyze</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">PROCUREMENT, PLAINLY</p>
+      <h1>Turn dense RFP language<br>into <em>clear terms.</em></h1>
+      <p class="lede">Paste government procurement text below. We’ll find the acronyms and technical terms, then explain each one in language anyone can understand.</p>
+    </section>
+
+    <section class="workspace" aria-label="Glossary extractor">
+      <div class="input-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="step">01</span>
+            <h2>Paste your RFP</h2>
+          </div>
+          <button id="sampleButton" class="text-button" type="button">Use example</button>
+        </div>
+        <label class="sr-only" for="rfpText">RFP document text</label>
+        <textarea id="rfpText" maxlength="100000" placeholder="Paste an RFP excerpt or full document here…"></textarea>
+        <div class="input-footer">
+          <span id="charCount">0 characters</span>
+          <button id="analyzeButton" class="primary-button" type="button">
+            <span>Build glossary</span><b aria-hidden="true">→</b>
+          </button>
+        </div>
+      </div>
+
+      <div class="result-panel" aria-live="polite">
+        <div class="panel-heading">
+          <div>
+            <span class="step">02</span>
+            <h2>Your glossary</h2>
+          </div>
+          <span id="termCount" class="term-count">0 terms</span>
+        </div>
+        <div id="results" class="results empty-state">
+          <div class="empty-icon" aria-hidden="true">Aa</div>
+          <h3>Plain English appears here</h3>
+          <p>Add document text and build your glossary. Repeated terms are automatically removed.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="trust-row" aria-label="Product benefits">
+      <div><strong>Fast</strong><span>Glossary in seconds</span></div>
+      <div><strong>Focused</strong><span>Only terms that matter</span></div>
+      <div><strong>Clean</strong><span>No duplicates, ever</span></div>
+    </section>
+  </main>
+
+  <footer><span>ClearTerms</span><span>Built for people who read the fine print.</span></footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
+

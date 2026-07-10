@@ -14,19 +14,23 @@ from dotenv import load_dotenv
 
 
 SYSTEM_PROMPT = """You are an expert in United States government procurement documents.
-Read the document and identify every acronym, abbreviation, and specialized technical or
-procurement term a general reader may not understand. For each term, write a concise,
-plain-English definition that is accurate in this context.
+Read the document and create two outputs:
+1. A short, plain-English summary of what the RFP text is asking for.
+2. A glossary of every acronym, abbreviation, and specialized technical or procurement
+   term a general reader may not understand. For each term, write a concise,
+   plain-English definition that is accurate in this context.
 
 Return ONLY a JSON object in this exact shape:
-{"terms": [{"term": "ACRONYM", "definition": "Plain-English explanation."}]}
+{"summary": "Plain-English summary.", "terms": [{"term": "ACRONYM", "definition": "Plain-English explanation."}]}
 
 Rules:
+- Keep the summary easy to understand, direct, and under 120 words.
+- In the summary, explain the purpose, work requested, important requirements, and deadlines only if the document says them.
 - Include terms only when they actually appear in the document.
 - Do not include duplicate terms, even with different capitalization.
 - Do not include ordinary words such as "contract", "document", "the", or "and".
 - Keep each definition to one or two short sentences.
-- If the text contains no jargon, return {"terms": []}.
+- If the text contains no jargon, return an empty terms list.
 - Do not add markdown or any text outside the JSON object.
 """
 
@@ -155,6 +159,54 @@ def _dedupe(terms: list[dict[str, Any]]) -> list[dict[str, str]]:
     return clean
 
 
+def _clean_summary(summary: Any) -> str:
+    clean = re.sub(r"\s+", " ", str(summary or "")).strip()
+    return clean
+
+
+def _local_summary(text: str) -> str:
+    clean = re.sub(r"\s+", " ", text).strip()
+    if not clean:
+        return ""
+
+    sentences = re.findall(r"[^.!?]+[.!?]?", clean)
+    sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
+    if not sentences:
+        sentences = [clean]
+
+    priority_words = (
+        "shall",
+        "must",
+        "require",
+        "requires",
+        "seeking",
+        "request",
+        "proposal",
+        "deliverable",
+        "deadline",
+        "performance",
+        "submit",
+        "provide",
+    )
+    chosen: list[str] = []
+    for sentence in sentences:
+        lower = sentence.lower()
+        if any(word in lower for word in priority_words):
+            chosen.append(sentence)
+        if len(chosen) == 3:
+            break
+    if not chosen:
+        chosen = sentences[:3]
+
+    summary = " ".join(chosen)
+    if len(summary) > 650:
+        summary = summary[:647].rsplit(" ", 1)[0].rstrip(",;:") + "..."
+    return (
+        "In plain English: this document describes a procurement request and the main "
+        f"requirements the vendor needs to follow. Key text: {summary}"
+    )
+
+
 def _document_expansion(text: str, acronym: str) -> str | None:
     """Find definitions written as 'Full Term (ABC)' or 'ABC (Full Term)'."""
     escaped = re.escape(acronym)
@@ -228,8 +280,8 @@ def _extract_local(text: str) -> list[dict[str, str]]:
     return found
 
 
-def _openrouter_request(text: str, api_key: str) -> list[dict[str, str]]:
-    """Ask OpenRouter for a schema-shaped glossary response."""
+def _openrouter_request(text: str, api_key: str) -> dict[str, Any]:
+    """Ask OpenRouter for a schema-shaped summary and glossary response."""
     model = os.getenv("OPENROUTER_MODEL", "openrouter/auto").strip() or "openrouter/auto"
     url = "https://openrouter.ai/api/v1/chat/completions"
     payload = {
@@ -268,20 +320,32 @@ def _openrouter_request(text: str, api_key: str) -> list[dict[str, str]]:
     try:
         raw = body["choices"][0]["message"]["content"]
         parsed = json.loads(raw)
-        return _dedupe(parsed.get("terms", []))
+        return {
+            "summary": _clean_summary(parsed.get("summary", "")),
+            "terms": _dedupe(parsed.get("terms", [])),
+        }
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("OpenRouter returned a response in an unexpected format.") from exc
 
 
-async def extract_glossary(text: str) -> tuple[list[dict[str, str]], str]:
-    """Return deduplicated terms and the extraction mode used."""
+async def analyze_rfp(text: str) -> tuple[dict[str, Any], str]:
+    """Return a plain-English summary, deduplicated terms, and the mode used."""
     if not text.strip():
-        return [], "local"
+        return {"summary": "", "terms": []}, "local"
     # Reload the private configuration so a newly added key works without a restart.
     load_dotenv(override=True)
     if os.getenv("GLOSSARY_MODE", "").strip().lower() == "local":
-        return _dedupe(_extract_local(text)), "local"
+        return {"summary": _local_summary(text), "terms": _dedupe(_extract_local(text))}, "local"
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if api_key:
-        return await asyncio.to_thread(_openrouter_request, text, api_key), "openrouter"
-    return _dedupe(_extract_local(text)), "local"
+        result = await asyncio.to_thread(_openrouter_request, text, api_key)
+        if not result["summary"]:
+            result["summary"] = _local_summary(text)
+        return result, "openrouter"
+    return {"summary": _local_summary(text), "terms": _dedupe(_extract_local(text))}, "local"
+
+
+async def extract_glossary(text: str) -> tuple[list[dict[str, str]], str]:
+    """Return deduplicated terms and the extraction mode used."""
+    result, mode = await analyze_rfp(text)
+    return result["terms"], mode

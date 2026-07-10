@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ai_extract import extract_glossary
+from ai_extract import analyze_rfp
 
 
 load_dotenv()
@@ -32,6 +32,7 @@ class Term(BaseModel):
 
 
 class GlossaryResponse(BaseModel):
+    summary: str
     terms: list[Term]
 
 
@@ -48,7 +49,7 @@ async def health() -> dict[str, str]:
 @app.post("/extract-glossary", response_model=GlossaryResponse)
 async def glossary(request: GlossaryRequest) -> GlossaryResponse:
     try:
-        terms, _mode = await extract_glossary(request.rfp_text)
-        return GlossaryResponse(terms=terms)
+        result, _mode = await analyze_rfp(request.rfp_text)
+        return GlossaryResponse(summary=result["summary"], terms=result["terms"])
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

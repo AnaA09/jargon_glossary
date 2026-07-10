@@ -1,6 +1,6 @@
 # jargon_glossary
 
-A FastAPI service and ClearTerms browser interface that finds procurement acronyms and explains them in plain English. Duplicate terms are removed automatically.
+A FastAPI service and ClearTerms browser interface that summarizes RFP text, finds procurement acronyms, and explains them in plain English. Duplicate terms are removed automatically.
 
 ## Run locally
 
@@ -16,7 +16,7 @@ uvicorn main:app --reload
 
 Open [http://localhost:8000](http://localhost:8000). The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-The included local demo recognizes common procurement terms and needs no API key. To analyze arbitrary RFP jargon with AI, add an OpenRouter API key to `.env`:
+The included local demo can summarize text and recognize common procurement terms without an API key. To get stronger AI summaries and analyze arbitrary RFP jargon, add an OpenRouter API key to `.env`:
 
 ```text
 OPENROUTER_API_KEY=your-key-here
@@ -34,10 +34,18 @@ curl -X POST http://localhost:8000/extract-glossary \
 The response has one stable shape:
 
 ```json
-{"terms":[{"term":"COTR","definition":"Contracting Officer's Technical Representative. The government employee who monitors a contractor's day-to-day technical work."}]}
+{
+  "summary": "The document asks the contractor to coordinate required deliverables, follow procurement rules, and submit performance information.",
+  "terms": [
+    {
+      "term": "COTR",
+      "definition": "Contracting Officer's Technical Representative. The government employee who monitors a contractor's day-to-day technical work."
+    }
+  ]
+}
 ```
 
-Simple text with no recognized jargon returns `{"terms":[]}` rather than an error.
+Simple text with no recognized jargon returns an empty `terms` list rather than an error.
 
 ## Run tests
 

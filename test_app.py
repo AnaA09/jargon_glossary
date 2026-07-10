@@ -21,7 +21,9 @@ def force_local_mode(monkeypatch):
 def test_sample_has_six_unique_terms():
     response = client.post("/extract-glossary", json={"rfp_text": SAMPLE})
     assert response.status_code == 200
-    terms = [item["term"] for item in response.json()["terms"]]
+    data = response.json()
+    assert data["summary"].startswith("In plain English:")
+    terms = [item["term"] for item in data["terms"]]
     assert terms == ["COTR", "PWS", "TPOC", "FAR", "DFARS", "CPARS"]
     assert len(terms) == len(set(terms))
 
@@ -29,7 +31,8 @@ def test_sample_has_six_unique_terms():
 def test_simple_text_returns_empty_list():
     response = client.post("/extract-glossary", json={"rfp_text": "Hello world"})
     assert response.status_code == 200
-    assert response.json() == {"terms": []}
+    assert response.json()["terms"] == []
+    assert response.json()["summary"].startswith("In plain English:")
 
 
 def test_unknown_acronyms_are_not_silently_dropped():
@@ -87,9 +90,10 @@ def test_openrouter_request_uses_bearer_key_and_parses_terms():
         return FakeResponse()
 
     with patch("urllib.request.urlopen", fake_urlopen):
-        assert _openrouter_request("FAR applies.", "test-key") == [
-            {"term": "FAR", "definition": "Federal Acquisition Regulation."}
-        ]
+        assert _openrouter_request("FAR applies.", "test-key") == {
+            "summary": "",
+            "terms": [{"term": "FAR", "definition": "Federal Acquisition Regulation."}],
+        }
 
 
 def test_home_and_health():

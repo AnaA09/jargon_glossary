@@ -23,6 +23,11 @@ def test_sample_has_six_unique_terms():
     assert response.status_code == 200
     data = response.json()
     assert data["summary"].startswith("In plain English:")
+    assert "COTR" not in data["summary"]
+    assert "PWS" not in data["summary"]
+    assert "FAR" not in data["summary"]
+    assert "government technical representative" in data["summary"]
+    assert "federal purchasing rules" in data["summary"]
     terms = [item["term"] for item in data["terms"]]
     assert terms == ["COTR", "PWS", "TPOC", "FAR", "DFARS", "CPARS"]
     assert len(terms) == len(set(terms))

@@ -15,7 +15,9 @@ from dotenv import load_dotenv
 
 SYSTEM_PROMPT = """You are an expert in United States government procurement documents.
 Read the document and create two outputs:
-1. A short, plain-English summary of what the RFP text is asking for.
+1. A short, plain-English summary of what the RFP text is asking for. The summary
+   must translate jargon and acronyms into their meanings instead of repeating the
+   acronym or specialized term.
 2. A glossary of every acronym, abbreviation, and specialized technical or procurement
    term a general reader may not understand. For each term, write a concise,
    plain-English definition that is accurate in this context.
@@ -26,6 +28,11 @@ Return ONLY a JSON object in this exact shape:
 Rules:
 - Keep the summary easy to understand, direct, and under 120 words.
 - In the summary, explain the purpose, work requested, important requirements, and deadlines only if the document says them.
+- Do not use raw acronyms or unexplained jargon in the summary. For example, write
+  "the government technical representative" instead of "COTR", "the work requirements"
+  instead of "PWS", and "federal purchasing rules" instead of "FAR".
+- If an acronym's exact meaning is unclear, describe its role from context in ordinary
+  words instead of copying the acronym.
 - Include terms only when they actually appear in the document.
 - Do not include duplicate terms, even with different capitalization.
 - Do not include ordinary words such as "contract", "document", "the", or "and".
@@ -164,10 +171,54 @@ def _clean_summary(summary: Any) -> str:
     return clean
 
 
+def _plain_language_phrase(term: str) -> str:
+    definition = LOCAL_GLOSSARY.get(term.upper(), "")
+    if not definition:
+        return "the referenced item"
+    phrase = definition.split(".", 1)[0].strip()
+    phrase = re.sub(r"\s+", " ", phrase)
+    replacements = {
+        "Contracting Officer's Technical Representative": "the government technical representative",
+        "Performance Work Statement": "the work requirements document",
+        "Technical Point of Contact": "the technical contact person",
+        "Federal Acquisition Regulation": "federal purchasing rules",
+        "Defense Federal Acquisition Regulation Supplement": "Defense Department purchasing rules",
+        "Contractor Performance Assessment Reporting System": "the contractor performance review system",
+        "Federal Risk and Authorization Management Program": "the federal cloud security authorization program",
+    }
+    return replacements.get(phrase, phrase[0].lower() + phrase[1:] if phrase else "the referenced item")
+
+
+def _translate_known_jargon(text: str) -> str:
+    translated = text
+    for term in sorted(LOCAL_GLOSSARY, key=len, reverse=True):
+        translated = re.sub(
+            rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])",
+            _plain_language_phrase(term),
+            translated,
+            flags=re.IGNORECASE,
+        )
+    translated = re.sub(r"\b([Tt]he)\s+the\b", r"\1", translated)
+    translated = re.sub(
+        r"with the work requirements document the technical contact person",
+        "with the technical contact person named in the work requirements document",
+        translated,
+        flags=re.IGNORECASE,
+    )
+    translated = re.sub(
+        r"before the contractor performance review system submission",
+        "before submitting contractor performance information",
+        translated,
+        flags=re.IGNORECASE,
+    )
+    return translated
+
+
 def _local_summary(text: str) -> str:
     clean = re.sub(r"\s+", " ", text).strip()
     if not clean:
         return ""
+    clean = _translate_known_jargon(clean)
 
     sentences = re.findall(r"[^.!?]+[.!?]?", clean)
     sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
@@ -202,8 +253,8 @@ def _local_summary(text: str) -> str:
     if len(summary) > 650:
         summary = summary[:647].rsplit(" ", 1)[0].rstrip(",;:") + "..."
     return (
-        "In plain English: this document describes a procurement request and the main "
-        f"requirements the vendor needs to follow. Key text: {summary}"
+        "In plain English: this document describes what the vendor needs to do and "
+        f"which rules or review steps matter. Key points: {summary}"
     )
 
 

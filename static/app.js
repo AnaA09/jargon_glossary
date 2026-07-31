@@ -1,12 +1,25 @@
 const textArea = document.querySelector('#rfpText');
 const analyzeButton = document.querySelector('#analyzeButton');
 const sampleButton = document.querySelector('#sampleButton');
+const segmentButton = document.querySelector('#segmentButton');
+const searchButton = document.querySelector('#searchButton');
 const results = document.querySelector('#results');
 const summary = document.querySelector('#summary');
+const sectionsOutput = document.querySelector('#sectionsOutput');
+const matchesOutput = document.querySelector('#matchesOutput');
+const clauseQuery = document.querySelector('#clauseQuery');
 const charCount = document.querySelector('#charCount');
 const termCount = document.querySelector('#termCount');
+const matchCount = document.querySelector('#matchCount');
 
-const sample = 'The COTR shall coordinate with the PWS-designated TPOC to ensure all deliverables comply with FAR Part 15 and applicable DFARS clauses prior to CPARS submission. The vendor must provide weekly status reports, maintain quality controls, and submit all required documentation before the end of the period of performance.';
+const sample = `SECTION 1: SCOPE OF WORK
+The COTR shall coordinate with the PWS-designated TPOC to ensure all deliverables comply with FAR Part 15 and applicable DFARS clauses prior to CPARS submission.
+
+SECTION 2: SUBMISSION REQUIREMENTS
+The vendor must provide weekly status reports, proof of general liability insurance of at least $1,000,000, and all required documentation before the end of the period of performance.
+
+SECTION 3: EVALUATION CRITERIA
+Proposals will be evaluated on technical approach, past performance, and price.`;
 
 function updateCount() {
   charCount.textContent = `${textArea.value.length.toLocaleString()} characters`;
@@ -55,6 +68,51 @@ function showTerms(terms) {
   termCount.textContent = `${terms.length} ${terms.length === 1 ? 'term' : 'terms'}`;
 }
 
+function showSections(sections) {
+  if (!sections.length) {
+    sectionsOutput.className = 'tool-output empty-state compact-empty';
+    sectionsOutput.innerHTML = '<h3>No sections found</h3><p>The input is empty, so there is nothing to split yet.</p>';
+    return;
+  }
+  sectionsOutput.className = 'tool-output';
+  sectionsOutput.replaceChildren();
+  sections.forEach(({heading, start_line, text}) => {
+    const card = document.createElement('article');
+    card.className = 'section-card';
+    const title = document.createElement('h3');
+    title.textContent = heading;
+    const meta = document.createElement('span');
+    meta.textContent = `Starts on line ${start_line}`;
+    const body = document.createElement('p');
+    body.textContent = text || 'No text appears under this heading.';
+    card.append(title, meta, body);
+    sectionsOutput.append(card);
+  });
+}
+
+function showMatches(matches) {
+  if (!matches.length) {
+    matchesOutput.className = 'tool-output empty-state compact-empty';
+    matchesOutput.innerHTML = '<h3>No matches yet</h3><p>Add RFP text and a search question first.</p>';
+    matchCount.textContent = '0 matches';
+    return;
+  }
+  matchesOutput.className = 'tool-output';
+  matchesOutput.replaceChildren();
+  matches.forEach(({text, score}) => {
+    const card = document.createElement('article');
+    card.className = 'match-card';
+    const scoreBadge = document.createElement('span');
+    scoreBadge.className = 'score-badge';
+    scoreBadge.textContent = `Score ${Number(score).toFixed(2)}`;
+    const body = document.createElement('p');
+    body.textContent = text;
+    card.append(scoreBadge, body);
+    matchesOutput.append(card);
+  });
+  matchCount.textContent = `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`;
+}
+
 async function analyze() {
   const rfpText = textArea.value.trim();
   analyzeButton.disabled = true;
@@ -82,7 +140,54 @@ async function analyze() {
   }
 }
 
+async function segmentRfp() {
+  segmentButton.disabled = true;
+  segmentButton.textContent = 'Splitting…';
+  try {
+    const response = await fetch('/segment-rfp', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rfp_text: textArea.value})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not split sections.');
+    showSections(data.sections);
+  } catch (error) {
+    sectionsOutput.className = 'tool-output';
+    sectionsOutput.innerHTML = `<p class="error">${error.message}</p>`;
+  } finally {
+    segmentButton.disabled = false;
+    segmentButton.textContent = 'Split sections';
+  }
+}
+
+async function searchClauses() {
+  const query = clauseQuery.value.trim();
+  searchButton.disabled = true;
+  searchButton.querySelector('span').textContent = 'Searching…';
+  try {
+    const response = await fetch('/search-clauses', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rfp_text: textArea.value, query, top_k: 3})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not search clauses.');
+    showMatches(data.matches);
+  } catch (error) {
+    matchesOutput.className = 'tool-output';
+    matchesOutput.innerHTML = `<p class="error">${error.message}</p>`;
+    matchCount.textContent = 'Error';
+  } finally {
+    searchButton.disabled = false;
+    searchButton.querySelector('span').textContent = 'Search clauses';
+  }
+}
+
 textArea.addEventListener('input', updateCount);
 analyzeButton.addEventListener('click', analyze);
+segmentButton.addEventListener('click', segmentRfp);
+searchButton.addEventListener('click', searchClauses);
 sampleButton.addEventListener('click', () => { textArea.value = sample; updateCount(); textArea.focus(); });
 textArea.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') analyze(); });
+clauseQuery.addEventListener('keydown', event => { if (event.key === 'Enter') searchClauses(); });

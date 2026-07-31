@@ -20,7 +20,7 @@
     <section class="hero">
       <p class="eyebrow">easy to understand</p>
       <h1>Extract RFP language<br>into <em>clear terms.</em></h1>
-      <p class="lede">Paste government procurement text below. We’ll find the acronyms and technical terms, then explain each one in language anyone can understand.</p>
+      <p class="lede">Paste government procurement text below. We’ll summarize it, explain jargon, split it into sections, and help you find the most relevant clauses.</p>
     </section>
 
     <section class="workspace" aria-label="Glossary extractor">
@@ -74,10 +74,41 @@
       </div>
     </section>
 
-    <section class="trust-row" aria-label="Product benefits">
-      <div><strong>Fast</strong><span>Glossary in seconds</span></div>
-      <div><strong>Focused</strong><span>Only terms that matter</span></div>
-      <div><strong>Clean</strong><span>No duplicates, ever</span></div>
+    <section class="feature-lab" aria-label="Day 1 and Day 2 RFP tools">
+      <div class="feature-card">
+        <div class="panel-heading">
+          <div>
+            <span class="step">D1</span>
+            <h2>Section segmenter</h2>
+          </div>
+          <button id="segmentButton" class="text-button" type="button">Split sections</button>
+        </div>
+        <p class="feature-help">Finds heading-like lines and groups the RFP text under normalized section names.</p>
+        <div id="sectionsOutput" class="tool-output empty-state compact-empty">
+          <h3>No sections yet</h3>
+          <p>Paste an RFP with headings, then split it into sections.</p>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="panel-heading">
+          <div>
+            <span class="step">D2</span>
+            <h2>Clause search</h2>
+          </div>
+          <span id="matchCount" class="term-count">0 matches</span>
+        </div>
+        <p class="feature-help">Ask a plain-English question and get the most relevant RFP passages.</p>
+        <div class="search-row">
+          <label class="sr-only" for="clauseQuery">Clause search question</label>
+          <input id="clauseQuery" type="search" placeholder="Example: what insurance is required?">
+          <button id="searchButton" class="primary-button" type="button"><span>Search clauses</span><b aria-hidden="true">→</b></button>
+        </div>
+        <div id="matchesOutput" class="tool-output empty-state compact-empty">
+          <h3>No matches yet</h3>
+          <p>Enter a question to search the pasted RFP text.</p>
+        </div>
+      </div>
     </section>
   </main>
 

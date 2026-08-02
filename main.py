@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ai_extract import analyze_rfp
-from rfp_intelligence import analyze_clause_search, analyze_rfp_sections
+from rfp_intelligence import analyze_clause_search, analyze_rfp_sections, answer_rfp_question, extract_requirement_checklist
 
 
 load_dotenv()
@@ -67,6 +67,32 @@ class ClauseSearchResponse(BaseModel):
     matches: list[ClauseMatch]
 
 
+class AskRfpRequest(BaseModel):
+    rfp_text: str = Field(default="", max_length=100_000)
+    question: str = Field(default="", max_length=500)
+
+
+class AskRfpResponse(BaseModel):
+    answer: str
+    source_excerpt: str
+    confidence: str
+
+
+class RequirementRequest(BaseModel):
+    rfp_text: str = Field(default="", max_length=100_000)
+
+
+class Requirement(BaseModel):
+    item: str
+    mandatory: bool
+    detail: str
+
+
+class RequirementResponse(BaseModel):
+    requirements: list[Requirement]
+    requirement_count: int
+
+
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
     return FileResponse(BASE_DIR / "static" / "index.html")
@@ -102,3 +128,18 @@ async def search_clauses(request: ClauseSearchRequest) -> ClauseSearchResponse:
         return ClauseSearchResponse(matches=matches)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/ask-rfp", response_model=AskRfpResponse)
+async def ask_rfp(request: AskRfpRequest) -> AskRfpResponse:
+    try:
+        result = await answer_rfp_question(request.rfp_text, request.question)
+        return AskRfpResponse(**result)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/extract-requirements", response_model=RequirementResponse)
+async def extract_requirements(request: RequirementRequest) -> RequirementResponse:
+    requirements = extract_requirement_checklist(request.rfp_text)
+    return RequirementResponse(requirements=requirements, requirement_count=len(requirements))

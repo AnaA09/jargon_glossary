@@ -1,4 +1,4 @@
-"""Day 1 and Day 2 RFP text-intelligence helpers."""
+"""RFP text-intelligence helpers for sectioning, search, answers, and requirements."""
 
 from __future__ import annotations
 
@@ -364,3 +364,181 @@ async def analyze_clause_search(text: str, query: str, top_k: int = 3) -> tuple[
         matches = await asyncio.to_thread(_openrouter_search_clauses, text, query, top_k)
         return matches or search_rfp_clauses(text, query, top_k), "openrouter"
     return search_rfp_clauses(text, query, top_k), "local"
+
+
+def _classify_question(question: str) -> str:
+    clean = question.lower()
+    if any(word in clean for word in ("when", "deadline", "due", "date", "time")):
+        return "date"
+    if any(word in clean for word in ("how much", "cost", "price", "dollar", "amount", "fee", "budget")):
+        return "money"
+    if clean.startswith(("is ", "are ", "does ", "do ", "can ", "will ", "must ", "should ")):
+        return "yes_no"
+    return "general"
+
+
+def _extract_precise_answer(chunk: str, question_type: str) -> tuple[str, str]:
+    clean_chunk = re.sub(r"\s+", " ", chunk).strip()
+    if not clean_chunk:
+        return "", "low"
+
+    if question_type == "date":
+        date_patterns = [
+            r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}(?:,?\s+(?:at|by|no later than)?\s*\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?(?:\s+local time)?)?",
+            r"\b\d{1,2}/\d{1,2}/\d{2,4}(?:\s+\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)?",
+            r"\b\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2})?",
+            r"\b(?:no later than|by|before)\s+\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)(?:\s+local time)?",
+        ]
+        for pattern in date_patterns:
+            match = re.search(pattern, clean_chunk, flags=re.IGNORECASE)
+            if match:
+                return match.group(0).strip(" ,."), "high"
+
+    if question_type == "money":
+        money_match = re.search(
+            r"\$\s?\d[\d,]*(?:\.\d{2})?|\b\d+(?:\.\d+)?\s*(?:percent|%)\b",
+            clean_chunk,
+            flags=re.IGNORECASE,
+        )
+        if money_match:
+            return money_match.group(0).strip(), "high"
+
+    if question_type == "yes_no":
+        lower = clean_chunk.lower()
+        if any(word in lower for word in ("must", "shall", "required", "will", "is required", "are required")):
+            return f"Yes. {clean_chunk}", "medium"
+        if any(word in lower for word in ("not required", "optional", "may", "should", "preferred")):
+            return f"Not strictly required. {clean_chunk}", "medium"
+
+    sentence_match = re.search(r"[^.!?]+[.!?]?", clean_chunk)
+    return (sentence_match.group(0).strip() if sentence_match else clean_chunk, "low")
+
+
+async def answer_rfp_question(text: str, question: str) -> dict[str, str]:
+    """Use clause search plus rules to extract a precise answer to an RFP question."""
+    if not text.strip() or not question.strip():
+        return {"answer": "", "source_excerpt": "", "confidence": "low"}
+
+    matches, _mode = await analyze_clause_search(text, question, top_k=1)
+    source_excerpt = matches[0]["text"] if matches else ""
+    question_type = _classify_question(question)
+    answer, confidence = _extract_precise_answer(source_excerpt, question_type)
+    if confidence == "low" and question_type in {"date", "money"}:
+        for chunk in chunk_rfp_text(text):
+            fallback_answer, fallback_confidence = _extract_precise_answer(chunk, question_type)
+            if fallback_confidence == "high":
+                answer = fallback_answer
+                source_excerpt = chunk
+                confidence = fallback_confidence
+                break
+    return {
+        "answer": answer or source_excerpt,
+        "source_excerpt": source_excerpt,
+        "confidence": confidence if answer else "low",
+    }
+
+
+REQUIREMENT_NOUNS = (
+    "bond",
+    "certificate",
+    "insurance",
+    "reference",
+    "references",
+    "license",
+    "licenses",
+    "plan",
+    "resume",
+    "resumes",
+    "report",
+    "reports",
+    "documentation",
+    "document",
+    "documents",
+    "proposal",
+    "pricing",
+    "quote",
+    "form",
+    "forms",
+    "certification",
+    "certifications",
+    "past performance",
+)
+
+OBLIGATION_VERBS = (
+    "submit",
+    "provide",
+    "include",
+    "attach",
+    "deliver",
+    "furnish",
+    "carry",
+    "maintain",
+    "certify",
+)
+
+MANDATORY_WORDS = ("shall", "must", "required", "requires", "requirement", "mandatory", "will")
+OPTIONAL_WORDS = ("may", "should", "encouraged", "preferred", "optional", "recommended")
+
+
+def _split_sentences(text: str) -> list[str]:
+    return [sentence.strip() for sentence in re.findall(r"[^.!?]+[.!?]?", re.sub(r"\s+", " ", text)) if sentence.strip()]
+
+
+def _is_requirement_sentence(sentence: str) -> bool:
+    lower = sentence.lower()
+    has_noun = any(noun in lower for noun in REQUIREMENT_NOUNS)
+    has_obligation = any(verb in lower for verb in OBLIGATION_VERBS) or any(word in lower for word in MANDATORY_WORDS + OPTIONAL_WORDS)
+    return has_noun and has_obligation
+
+
+def _is_mandatory(sentence: str) -> bool:
+    lower = sentence.lower()
+    mandatory_positions = [lower.find(word) for word in MANDATORY_WORDS if word in lower]
+    optional_positions = [lower.find(word) for word in OPTIONAL_WORDS if word in lower]
+    if mandatory_positions and optional_positions:
+        # Mixed signals are treated by the first signal in the sentence.
+        return min(position for position in mandatory_positions if position >= 0) < min(
+            position for position in optional_positions if position >= 0
+        )
+    if mandatory_positions:
+        return True
+    return False
+
+
+def _requirement_item(sentence: str) -> str:
+    lower = sentence.lower()
+    if "proposal" in lower and any(word in lower for word in ("received", "submitted", "submit")):
+        return "Proposal submission"
+    patterns = [
+        r"(?:submit|provide|include|attach|deliver|furnish|carry|maintain)\s+(?:all\s+required\s+|a\s+|an\s+|the\s+)?([^.;:]+)",
+        r"((?:bid\s+)?bond|certificate of insurance|insurance certificate|general liability insurance|client references?|licenses?|plans?|reports?|documentation|forms?|certifications?|past performance)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, lower, flags=re.IGNORECASE)
+        if match:
+            item = match.group(1).strip()
+            item = re.split(r"\s+(?:by|before|with|and all|and the|, and)\b", item, maxsplit=1)[0].strip(" ,.")
+            return item[:1].upper() + item[1:]
+    return sentence[:70].rstrip(" .,")
+
+
+def extract_requirement_checklist(text: str) -> list[dict[str, Any]]:
+    """Extract vendor submission requirements as a validated checklist-shaped list."""
+    requirements: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for sentence in _split_sentences(text):
+        if not _is_requirement_sentence(sentence):
+            continue
+        item = _requirement_item(sentence)
+        key = item.casefold()
+        if not item or key in seen:
+            continue
+        seen.add(key)
+        requirements.append(
+            {
+                "item": item,
+                "mandatory": _is_mandatory(sentence),
+                "detail": sentence.strip(),
+            }
+        )
+    return requirements

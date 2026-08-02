@@ -2,21 +2,24 @@ const textArea = document.querySelector('#rfpText');
 const analyzeButton = document.querySelector('#analyzeButton');
 const sampleButton = document.querySelector('#sampleButton');
 const segmentButton = document.querySelector('#segmentButton');
-const searchButton = document.querySelector('#searchButton');
+const questionButton = document.querySelector('#questionButton');
+const requirementsButton = document.querySelector('#requirementsButton');
 const results = document.querySelector('#results');
 const summary = document.querySelector('#summary');
 const sectionsOutput = document.querySelector('#sectionsOutput');
-const matchesOutput = document.querySelector('#matchesOutput');
-const clauseQuery = document.querySelector('#clauseQuery');
+const questionOutput = document.querySelector('#questionOutput');
+const requirementsOutput = document.querySelector('#requirementsOutput');
+const rfpQuestion = document.querySelector('#rfpQuestion');
 const charCount = document.querySelector('#charCount');
 const termCount = document.querySelector('#termCount');
-const matchCount = document.querySelector('#matchCount');
+const answerConfidence = document.querySelector('#answerConfidence');
+const requirementCount = document.querySelector('#requirementCount');
 
 const sample = `SECTION 1: SCOPE OF WORK
 The COTR shall coordinate with the PWS-designated TPOC to ensure all deliverables comply with FAR Part 15 and applicable DFARS clauses prior to CPARS submission.
 
 SECTION 2: SUBMISSION REQUIREMENTS
-The vendor must provide weekly status reports, proof of general liability insurance of at least $1,000,000, and all required documentation before the end of the period of performance.
+The vendor must provide weekly status reports, proof of general liability insurance of at least $1,000,000, three client references, and all required documentation before the end of the period of performance. All proposals must be received no later than 4:00 PM local time on August 15, 2026. A transition plan should be included when available.
 
 SECTION 3: EVALUATION CRITERIA
 Proposals will be evaluated on technical approach, past performance, and price.`;
@@ -90,15 +93,15 @@ function showSections(sections) {
   });
 }
 
-function showMatches(matches) {
+function createMatchesFragment(matches) {
+  const fragment = document.createDocumentFragment();
   if (!matches.length) {
-    matchesOutput.className = 'tool-output empty-state compact-empty';
-    matchesOutput.innerHTML = '<h3>No matches yet</h3><p>Add RFP text and a search question first.</p>';
-    matchCount.textContent = '0 matches';
-    return;
+    const empty = document.createElement('p');
+    empty.className = 'muted-note';
+    empty.textContent = 'No related passages were found.';
+    fragment.append(empty);
+    return fragment;
   }
-  matchesOutput.className = 'tool-output';
-  matchesOutput.replaceChildren();
   matches.forEach(({text, score}) => {
     const card = document.createElement('article');
     card.className = 'match-card';
@@ -108,9 +111,67 @@ function showMatches(matches) {
     const body = document.createElement('p');
     body.textContent = text;
     card.append(scoreBadge, body);
-    matchesOutput.append(card);
+    fragment.append(card);
   });
-  matchCount.textContent = `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`;
+  return fragment;
+}
+
+function showQuestionResults(answerData, matches) {
+  questionOutput.className = 'tool-output';
+  questionOutput.replaceChildren();
+
+  if (!answerData.answer) {
+    questionOutput.className = 'tool-output empty-state compact-empty';
+    questionOutput.innerHTML = '<h3>No answer found</h3><p>Try asking a more specific question about the RFP.</p>';
+    answerConfidence.textContent = 'Low confidence';
+    return;
+  }
+
+  const card = document.createElement('article');
+  card.className = 'answer-card';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Direct answer';
+  const answer = document.createElement('p');
+  answer.textContent = answerData.answer;
+  const sourceHeading = document.createElement('span');
+  sourceHeading.className = 'source-label';
+  sourceHeading.textContent = 'Best source excerpt';
+  const source = document.createElement('p');
+  source.className = 'source-excerpt';
+  source.textContent = answerData.source_excerpt || 'No source excerpt available.';
+  card.append(heading, answer, sourceHeading, source);
+
+  const matchesHeading = document.createElement('h3');
+  matchesHeading.className = 'matches-heading';
+  matchesHeading.textContent = 'Related passages';
+
+  questionOutput.append(card, matchesHeading, createMatchesFragment(matches));
+  answerConfidence.textContent = `${answerData.confidence || 'low'} confidence`;
+}
+
+function showRequirements(requirements) {
+  if (!requirements.length) {
+    requirementsOutput.className = 'tool-output empty-state compact-empty';
+    requirementsOutput.innerHTML = '<h3>No requirements found</h3><p>No explicit vendor submission requirements were detected.</p>';
+    requirementCount.textContent = '0 items';
+    return;
+  }
+  requirementsOutput.className = 'tool-output';
+  requirementsOutput.replaceChildren();
+  requirements.forEach(({item, mandatory, detail}) => {
+    const card = document.createElement('article');
+    card.className = 'requirement-card';
+    const badge = document.createElement('span');
+    badge.className = mandatory ? 'status-badge required' : 'status-badge optional';
+    badge.textContent = mandatory ? 'Required' : 'Optional';
+    const heading = document.createElement('h3');
+    heading.textContent = item;
+    const body = document.createElement('p');
+    body.textContent = detail;
+    card.append(badge, heading, body);
+    requirementsOutput.append(card);
+  });
+  requirementCount.textContent = `${requirements.length} ${requirements.length === 1 ? 'item' : 'items'}`;
 }
 
 async function analyze() {
@@ -161,33 +222,65 @@ async function segmentRfp() {
   }
 }
 
-async function searchClauses() {
-  const query = clauseQuery.value.trim();
-  searchButton.disabled = true;
-  searchButton.querySelector('span').textContent = 'Searching…';
+async function searchRfpQuestion() {
+  const question = rfpQuestion.value.trim();
+  questionButton.disabled = true;
+  questionButton.querySelector('span').textContent = 'Searching…';
   try {
-    const response = await fetch('/search-clauses', {
+    const [answerResponse, matchesResponse] = await Promise.all([
+      fetch('/ask-rfp', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rfp_text: textArea.value, question})
+      }),
+      fetch('/search-clauses', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rfp_text: textArea.value, query: question, top_k: 3})
+      })
+    ]);
+    const answerData = await answerResponse.json();
+    const matchesData = await matchesResponse.json();
+    if (!answerResponse.ok) throw new Error(answerData.detail || 'Could not answer the question.');
+    if (!matchesResponse.ok) throw new Error(matchesData.detail || 'Could not search related passages.');
+    showQuestionResults(answerData, matchesData.matches || []);
+  } catch (error) {
+    questionOutput.className = 'tool-output';
+    questionOutput.innerHTML = `<p class="error">${error.message}</p>`;
+    answerConfidence.textContent = 'Error';
+  } finally {
+    questionButton.disabled = false;
+    questionButton.querySelector('span').textContent = 'Search RFP';
+  }
+}
+
+async function extractRequirements() {
+  requirementsButton.disabled = true;
+  requirementsButton.querySelector('span').textContent = 'Extracting…';
+  try {
+    const response = await fetch('/extract-requirements', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rfp_text: textArea.value, query, top_k: 3})
+      body: JSON.stringify({rfp_text: textArea.value})
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Could not search clauses.');
-    showMatches(data.matches);
+    if (!response.ok) throw new Error(data.detail || 'Could not extract requirements.');
+    showRequirements(data.requirements);
   } catch (error) {
-    matchesOutput.className = 'tool-output';
-    matchesOutput.innerHTML = `<p class="error">${error.message}</p>`;
-    matchCount.textContent = 'Error';
+    requirementsOutput.className = 'tool-output';
+    requirementsOutput.innerHTML = `<p class="error">${error.message}</p>`;
+    requirementCount.textContent = 'Error';
   } finally {
-    searchButton.disabled = false;
-    searchButton.querySelector('span').textContent = 'Search clauses';
+    requirementsButton.disabled = false;
+    requirementsButton.querySelector('span').textContent = 'Extract checklist';
   }
 }
 
 textArea.addEventListener('input', updateCount);
 analyzeButton.addEventListener('click', analyze);
 segmentButton.addEventListener('click', segmentRfp);
-searchButton.addEventListener('click', searchClauses);
+questionButton.addEventListener('click', searchRfpQuestion);
+requirementsButton.addEventListener('click', extractRequirements);
 sampleButton.addEventListener('click', () => { textArea.value = sample; updateCount(); textArea.focus(); });
 textArea.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') analyze(); });
-clauseQuery.addEventListener('keydown', event => { if (event.key === 'Enter') searchClauses(); });
+rfpQuestion.addEventListener('keydown', event => { if (event.key === 'Enter') searchRfpQuestion(); });

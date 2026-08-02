@@ -216,3 +216,59 @@ def test_openrouter_search_clauses_parses_matches():
         assert _openrouter_search_clauses("Insurance is required.", "insurance?", 3) == [
             {"text": "Insurance is required.", "score": 0.91}
         ]
+
+
+def test_ask_rfp_extracts_precise_deadline_answer():
+    response = client.post(
+        "/ask-rfp",
+        json={
+            "rfp_text": (
+                "The contractor shall provide help desk services.\n\n"
+                "All proposals must be received no later than 4:00 PM local time on August 15, 2026."
+            ),
+            "question": "What is the submission deadline?",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "August 15, 2026" in data["answer"]
+    assert data["source_excerpt"]
+    assert data["confidence"] == "high"
+
+
+def test_ask_rfp_falls_back_to_source_excerpt_for_general_question():
+    response = client.post(
+        "/ask-rfp",
+        json={
+            "rfp_text": "Proposals will be evaluated on technical approach, past performance, and price.",
+            "question": "What are the evaluation criteria?",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "technical approach" in data["answer"].lower()
+    assert data["confidence"] == "low"
+
+
+def test_extract_requirements_returns_structured_checklist():
+    response = client.post(
+        "/extract-requirements",
+        json={
+            "rfp_text": (
+                "The vendor must provide proof of general liability insurance of at least $1,000,000. "
+                "Offerors shall include three client references with the proposal. "
+                "A transition plan should be included when available."
+            )
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["requirement_count"] == 3
+    assert data["requirements"][0]["mandatory"] is True
+    assert data["requirements"][2]["mandatory"] is False
+
+
+def test_extract_requirements_returns_empty_list_when_none_found():
+    response = client.post("/extract-requirements", json={"rfp_text": "This document describes background only."})
+    assert response.status_code == 200
+    assert response.json() == {"requirements": [], "requirement_count": 0}

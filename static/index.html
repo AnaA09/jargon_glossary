@@ -74,11 +74,10 @@
       </div>
     </section>
 
-    <section class="feature-lab" aria-label="Day 1 and Day 2 RFP tools">
+    <section class="feature-lab" aria-label="RFP intelligence tools">
       <div class="feature-card">
         <div class="panel-heading">
           <div>
-            <span class="step">D1</span>
             <h2>Section segmenter</h2>
           </div>
           <button id="segmentButton" class="text-button" type="button">Split sections</button>
@@ -93,20 +92,34 @@
       <div class="feature-card">
         <div class="panel-heading">
           <div>
-            <span class="step">D2</span>
-            <h2>Clause search</h2>
+            <h2>Question search</h2>
           </div>
-          <span id="matchCount" class="term-count">0 matches</span>
+          <span id="answerConfidence" class="term-count">No answer</span>
         </div>
-        <p class="feature-help">Ask a plain-English question and get the most relevant RFP passages.</p>
+        <p class="feature-help">Ask one question and get both a direct answer and the most relevant source passages.</p>
         <div class="search-row">
-          <label class="sr-only" for="clauseQuery">Clause search question</label>
-          <input id="clauseQuery" type="search" placeholder="Example: what insurance is required?">
-          <button id="searchButton" class="primary-button" type="button"><span>Search clauses</span><b aria-hidden="true">→</b></button>
+          <label class="sr-only" for="rfpQuestion">RFP question</label>
+          <input id="rfpQuestion" type="search" placeholder="Example: what insurance is required?">
+          <button id="questionButton" class="primary-button" type="button"><span>Search RFP</span><b aria-hidden="true">→</b></button>
         </div>
-        <div id="matchesOutput" class="tool-output empty-state compact-empty">
-          <h3>No matches yet</h3>
-          <p>Enter a question to search the pasted RFP text.</p>
+        <div id="questionOutput" class="tool-output empty-state compact-empty">
+          <h3>No search yet</h3>
+          <p>Ask a question about the pasted RFP text.</p>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="panel-heading">
+          <div>
+            <h2>Requirement checklist</h2>
+          </div>
+          <span id="requirementCount" class="term-count">0 items</span>
+        </div>
+        <p class="feature-help">Pulls out what the vendor must or should submit, then marks each item required or optional.</p>
+        <button id="requirementsButton" class="primary-button inline-action" type="button"><span>Extract checklist</span><b aria-hidden="true">→</b></button>
+        <div id="requirementsOutput" class="tool-output empty-state compact-empty">
+          <h3>No checklist yet</h3>
+          <p>Paste an RFP and extract vendor submission requirements.</p>
         </div>
       </div>
     </section>

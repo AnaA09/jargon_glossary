@@ -1,6 +1,6 @@
 # jargon_glossary
 
-A FastAPI service and ClearTerms browser interface that summarizes RFP text, finds procurement acronyms, splits RFPs into sections, and searches for relevant clauses. Duplicate glossary terms are removed automatically.
+A FastAPI service and ClearTerms browser interface that summarizes RFP text, finds procurement acronyms, splits RFPs into sections, searches relevant clauses, answers RFP questions, and extracts vendor requirement checklists. Duplicate glossary terms are removed automatically.
 
 ## Run locally
 
@@ -16,7 +16,7 @@ uvicorn main:app --reload
 
 Open [http://localhost:8000](http://localhost:8000). The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-The included local demo can summarize text, recognize common procurement terms, segment sections, and search clauses without an API key. To get stronger AI summaries, better section segmentation, and better clause search, add an OpenRouter API key to `.env`:
+The included local demo can summarize text, recognize common procurement terms, segment sections, search clauses, answer questions, and extract requirement checklists without an API key. To get stronger AI summaries, better section segmentation, and better clause search, add an OpenRouter API key to `.env`:
 
 ```text
 OPENROUTER_API_KEY=your-key-here
@@ -96,6 +96,47 @@ Example response:
       "score": 0.81
     }
   ]
+}
+```
+
+## Day 3: ask a precise RFP question
+
+```bash
+curl -X POST http://localhost:8000/ask-rfp \
+  -H "Content-Type: application/json" \
+  -d '{"rfp_text":"All proposals must be received no later than 4:00 PM local time on August 15, 2026.","question":"What is the submission deadline?"}'
+```
+
+Example response:
+
+```json
+{
+  "answer": "August 15, 2026",
+  "source_excerpt": "All proposals must be received no later than 4:00 PM local time on August 15, 2026.",
+  "confidence": "high"
+}
+```
+
+## Day 4: extract vendor requirements
+
+```bash
+curl -X POST http://localhost:8000/extract-requirements \
+  -H "Content-Type: application/json" \
+  -d '{"rfp_text":"The vendor must provide proof of general liability insurance of at least $1,000,000. A transition plan should be included when available."}'
+```
+
+Example response:
+
+```json
+{
+  "requirements": [
+    {
+      "item": "Proof of general liability insurance of at least $1,000,000",
+      "mandatory": true,
+      "detail": "The vendor must provide proof of general liability insurance of at least $1,000,000."
+    }
+  ],
+  "requirement_count": 1
 }
 ```
 

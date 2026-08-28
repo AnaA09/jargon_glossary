@@ -272,3 +272,109 @@ def test_extract_requirements_returns_empty_list_when_none_found():
     response = client.post("/extract-requirements", json={"rfp_text": "This document describes background only."})
     assert response.status_code == 200
     assert response.json() == {"requirements": [], "requirement_count": 0}
+
+
+def test_resolve_amendments_applies_modified_and_struck_sections():
+    response = client.post(
+        "/resolve-amendments",
+        json={
+            "original_text": (
+                "4.2 Insurance Requirements\n"
+                "Contractor shall maintain minimum $1,000,000 general liability coverage.\n\n"
+                "7.1 On-site Support\n"
+                "Contractor shall provide on-site support."
+            ),
+            "amendments": [
+                {
+                    "amendment_number": 1,
+                    "date": "2026-06-02",
+                    "text": "Amendment 1: Section 4.2 (Insurance Requirements) is revised to read: 'Contractor shall maintain minimum $2,000,000 general liability coverage.'",
+                },
+                {
+                    "amendment_number": 2,
+                    "date": "2026-06-10",
+                    "text": "Amendment 2: Section 7.1 (On-site Support) is struck in its entirety.",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    sections = {item["section"]: item for item in data["effective_sections"]}
+    assert sections["4.2"]["status"] == "modified"
+    assert "$2,000,000" in sections["4.2"]["text"]
+    assert sections["7.1"]["status"] == "struck"
+    assert sections["7.1"]["text"] is None
+    assert len(data["changelog"]) == 2
+
+
+def test_reconstruct_outline_builds_tree_and_warns_about_skipped_number():
+    response = client.post(
+        "/reconstruct-outline",
+        json={
+            "document_text": (
+                "1. Introduction\n"
+                "Some intro text.\n"
+                "1.1 Purpose\n"
+                "Text here.\n"
+                "2. Scope of Work\n"
+                "2.1 Deliverables\n"
+                "2.1.1 Phase One\n"
+                "Text.\n"
+                "2.1.3 Phase Three\n"
+                "Text."
+            )
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["outline"][0]["children"][0]["number"] == "1.1"
+    assert data["outline"][1]["children"][0]["children"][1]["number"] == "2.1.3"
+    assert data["warnings"][0]["type"] == "skipped_number"
+
+
+def test_reconstruct_outline_without_headings_returns_empty_outline():
+    response = client.post("/reconstruct-outline", json={"document_text": "No numbered headings here."})
+    assert response.status_code == 200
+    assert response.json() == {"outline": [], "warnings": []}
+
+
+def test_build_compliance_matrix_scores_mandatory_requirements():
+    response = client.post(
+        "/build-compliance-matrix",
+        json={
+            "requirements": [
+                {
+                    "id": "req-1",
+                    "text": "Vendor must provide 24/7 technical support with a maximum 1-hour response time.",
+                    "mandatory": True,
+                },
+                {
+                    "id": "req-2",
+                    "text": "Vendor should offer optional on-site training for staff.",
+                    "mandatory": False,
+                },
+            ],
+            "proposal_text": "Our support desk operates around the clock, every day of the year, and guarantees a response within 45 minutes.",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["matrix"][0]["status"] == "met"
+    assert data["mandatory_requirements_met"] == 1
+    assert data["mandatory_requirements_total"] == 1
+    assert data["overall_flag"] == "passes_mandatory_requirements"
+
+
+def test_build_compliance_matrix_handles_no_mandatory_requirements():
+    response = client.post(
+        "/build-compliance-matrix",
+        json={
+            "requirements": [{"id": "req-1", "text": "Vendor should offer optional training.", "mandatory": False}],
+            "proposal_text": "",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mandatory_requirements_total"] == 0
+    assert data["overall_flag"] == "no_mandatory_requirements"

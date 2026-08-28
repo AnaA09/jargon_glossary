@@ -1,6 +1,6 @@
 # jargon_glossary
 
-A FastAPI service and ClearTerms browser interface that summarizes RFP text, finds procurement acronyms, splits RFPs into sections, searches relevant clauses, answers RFP questions, and extracts vendor requirement checklists. Duplicate glossary terms are removed automatically.
+A FastAPI service and ClearTerms browser interface that summarizes RFP text, finds procurement acronyms, splits RFPs into sections, searches relevant clauses, answers RFP questions, extracts vendor requirement checklists, resolves amendments, reconstructs outlines, and builds proposal compliance matrices. Duplicate glossary terms are removed automatically.
 
 ## Run locally
 
@@ -16,7 +16,7 @@ uvicorn main:app --reload
 
 Open [http://localhost:8000](http://localhost:8000). The API documentation is at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-The included local demo can summarize text, recognize common procurement terms, segment sections, search clauses, answer questions, and extract requirement checklists without an API key. To get stronger AI summaries, better section segmentation, and better clause search, add an OpenRouter API key to `.env`:
+The included local demo can summarize text, recognize common procurement terms, segment sections, search clauses, answer questions, extract requirement checklists, resolve amendments, reconstruct outlines, and build compliance matrices without an API key. To get stronger AI summaries, better section segmentation, and better clause search, add an OpenRouter API key to `.env`:
 
 ```text
 OPENROUTER_API_KEY=your-key-here
@@ -138,6 +138,36 @@ Example response:
   ],
   "requirement_count": 1
 }
+```
+
+## Amendment resolver
+
+Applies dated amendments to the original RFP text. Later amendments win when they touch the same section.
+
+```bash
+curl -X POST http://localhost:8000/resolve-amendments \
+  -H "Content-Type: application/json" \
+  -d '{"original_text":"4.2 Insurance Requirements\nContractor shall maintain minimum $1,000,000 coverage.","amendments":[{"amendment_number":1,"date":"2026-06-02","text":"Amendment 1: Section 4.2 (Insurance Requirements) is revised to read: '\''Contractor shall maintain minimum $2,000,000 coverage.'\''"}]}'
+```
+
+## Outline reconstructor
+
+Parses numbered headings into a nested tree. It supports dotted numeric headings like `1.`, `1.1`, `1.1.2`, plus simple `a.` and `i.` subheadings. It returns heading body text so each outline node is still traceable to the source document.
+
+```bash
+curl -X POST http://localhost:8000/reconstruct-outline \
+  -H "Content-Type: application/json" \
+  -d '{"document_text":"1. Introduction\n1.1 Purpose\n2. Scope\n2.1 Work\n2.1.3 Phase Three"}'
+```
+
+## Compliance matrix
+
+Compares requirement text against vendor proposal text. The local scoring uses the same chunking/search helper as clause search, then applies simple rule checks for response times, years of experience, and negative language. Similarity alone can be fooled by topically related but contradictory text, so the matrix includes confidence and notes for human review.
+
+```bash
+curl -X POST http://localhost:8000/build-compliance-matrix \
+  -H "Content-Type: application/json" \
+  -d '{"requirements":[{"id":"req-1","text":"Vendor must provide 24/7 technical support with a maximum 1-hour response time.","mandatory":true}],"proposal_text":"Our support desk operates around the clock and responds within 45 minutes."}'
 ```
 
 ## Run tests

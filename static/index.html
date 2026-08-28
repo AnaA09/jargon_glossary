@@ -122,6 +122,55 @@
           <p>Paste an RFP and extract vendor submission requirements.</p>
         </div>
       </div>
+
+      <div class="feature-card">
+        <div class="panel-heading">
+          <div>
+            <h2>Amendment resolver</h2>
+          </div>
+          <span id="amendmentCount" class="term-count">0 changes</span>
+        </div>
+        <p class="feature-help">Uses the pasted RFP as the original document, then applies amendment text to show the current effective clauses.</p>
+        <label class="sr-only" for="amendmentText">Amendment text</label>
+        <textarea id="amendmentText" class="mini-textarea" placeholder="Paste amendment text here. Example: Amendment 1: Section 2 (Submission Requirements) is revised to read: 'Proposals are due July 15, 2026.'"></textarea>
+        <button id="amendmentButton" class="primary-button inline-action" type="button"><span>Resolve amendments</span><b aria-hidden="true">→</b></button>
+        <div id="amendmentOutput" class="tool-output empty-state compact-empty">
+          <h3>No amendments resolved yet</h3>
+          <p>Paste amendment language to see what changed.</p>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="panel-heading">
+          <div>
+            <h2>Outline reconstructor</h2>
+          </div>
+          <span id="outlineWarningCount" class="term-count">0 warnings</span>
+        </div>
+        <p class="feature-help">Turns numbered headings from the pasted RFP into a nested outline and flags numbering issues.</p>
+        <button id="outlineButton" class="primary-button inline-action" type="button"><span>Build outline</span><b aria-hidden="true">→</b></button>
+        <div id="outlineOutput" class="tool-output empty-state compact-empty">
+          <h3>No outline yet</h3>
+          <p>Paste text with numbered headings like 1., 1.1, or 1.1.2.</p>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="panel-heading">
+          <div>
+            <h2>Compliance matrix</h2>
+          </div>
+          <span id="complianceFlag" class="term-count">Not checked</span>
+        </div>
+        <p class="feature-help">Compares extracted RFP requirements against a vendor proposal and flags what is met or missing.</p>
+        <label class="sr-only" for="proposalText">Vendor proposal text</label>
+        <textarea id="proposalText" class="mini-textarea" placeholder="Paste vendor proposal text here."></textarea>
+        <button id="complianceButton" class="primary-button inline-action" type="button"><span>Build matrix</span><b aria-hidden="true">→</b></button>
+        <div id="complianceOutput" class="tool-output empty-state compact-empty">
+          <h3>No matrix yet</h3>
+          <p>Paste a vendor proposal to compare against the RFP requirements.</p>
+        </div>
+      </div>
     </section>
   </main>
 

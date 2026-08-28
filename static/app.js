@@ -4,16 +4,27 @@ const sampleButton = document.querySelector('#sampleButton');
 const segmentButton = document.querySelector('#segmentButton');
 const questionButton = document.querySelector('#questionButton');
 const requirementsButton = document.querySelector('#requirementsButton');
+const amendmentButton = document.querySelector('#amendmentButton');
+const outlineButton = document.querySelector('#outlineButton');
+const complianceButton = document.querySelector('#complianceButton');
 const results = document.querySelector('#results');
 const summary = document.querySelector('#summary');
 const sectionsOutput = document.querySelector('#sectionsOutput');
 const questionOutput = document.querySelector('#questionOutput');
 const requirementsOutput = document.querySelector('#requirementsOutput');
+const amendmentOutput = document.querySelector('#amendmentOutput');
+const outlineOutput = document.querySelector('#outlineOutput');
+const complianceOutput = document.querySelector('#complianceOutput');
 const rfpQuestion = document.querySelector('#rfpQuestion');
+const amendmentText = document.querySelector('#amendmentText');
+const proposalText = document.querySelector('#proposalText');
 const charCount = document.querySelector('#charCount');
 const termCount = document.querySelector('#termCount');
 const answerConfidence = document.querySelector('#answerConfidence');
 const requirementCount = document.querySelector('#requirementCount');
+const amendmentCount = document.querySelector('#amendmentCount');
+const outlineWarningCount = document.querySelector('#outlineWarningCount');
+const complianceFlag = document.querySelector('#complianceFlag');
 
 const sample = `SECTION 1: SCOPE OF WORK
 The COTR shall coordinate with the PWS-designated TPOC to ensure all deliverables comply with FAR Part 15 and applicable DFARS clauses prior to CPARS submission.
@@ -23,6 +34,13 @@ The vendor must provide weekly status reports, proof of general liability insura
 
 SECTION 3: EVALUATION CRITERIA
 Proposals will be evaluated on technical approach, past performance, and price.`;
+
+const sampleAmendment = `Amendment 1: Section 2 (Submission Requirements) is revised to read: 'The vendor must provide proof of general liability insurance of at least $2,000,000 and submit proposals by July 15, 2026.'
+Amendment 2: Section 3 (Evaluation Criteria) is struck in its entirety.`;
+
+const sampleProposal = `Our support desk operates around the clock, every day of the year, and our team responds within 45 minutes.
+We will provide proof of general liability insurance of $2,000,000 with the proposal.
+Our transition manager can provide a transition plan after award.`;
 
 function updateCount() {
   charCount.textContent = `${textArea.value.length.toLocaleString()} characters`;
@@ -174,6 +192,116 @@ function showRequirements(requirements) {
   requirementCount.textContent = `${requirements.length} ${requirements.length === 1 ? 'item' : 'items'}`;
 }
 
+function showAmendments(data) {
+  amendmentOutput.className = 'tool-output';
+  amendmentOutput.replaceChildren();
+  if (!data.effective_sections.length) {
+    amendmentOutput.className = 'tool-output empty-state compact-empty';
+    amendmentOutput.innerHTML = '<h3>No sections found</h3><p>Add original RFP text and amendment language first.</p>';
+    amendmentCount.textContent = '0 changes';
+    return;
+  }
+  data.effective_sections.forEach(({section, heading, text, status, modified_by_amendment}) => {
+    const card = document.createElement('article');
+    card.className = 'section-card';
+    const badge = document.createElement('span');
+    badge.className = `status-badge ${status === 'struck' ? 'optional' : 'required'}`;
+    badge.textContent = status;
+    const title = document.createElement('h3');
+    title.textContent = `${section} ${heading}`;
+    const meta = document.createElement('span');
+    meta.textContent = modified_by_amendment ? `Changed by amendment ${modified_by_amendment}` : 'Original text';
+    const body = document.createElement('p');
+    body.textContent = text || 'This section was struck and is no longer effective.';
+    card.append(badge, title, meta, body);
+    amendmentOutput.append(card);
+  });
+  if (data.unmatched_amendment_text.length) {
+    const warning = document.createElement('p');
+    warning.className = 'error';
+    warning.textContent = `Needs review: ${data.unmatched_amendment_text.join(' ')}`;
+    amendmentOutput.append(warning);
+  }
+  amendmentCount.textContent = `${data.changelog.length} ${data.changelog.length === 1 ? 'change' : 'changes'}`;
+}
+
+function createOutlineList(nodes) {
+  if (!nodes.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted-note';
+    empty.textContent = 'No numbered headings were found.';
+    return empty;
+  }
+  const list = document.createElement('ol');
+  list.className = 'outline-tree';
+  nodes.forEach(node => {
+    const item = document.createElement('li');
+    const title = document.createElement('strong');
+    title.textContent = `${node.number} ${node.heading}`;
+    item.append(title);
+    if (node.text) {
+      const body = document.createElement('p');
+      body.textContent = node.text;
+      item.append(body);
+    }
+    item.append(createOutlineList(node.children || []));
+    list.append(item);
+  });
+  return list;
+}
+
+function showOutline(data) {
+  outlineOutput.className = 'tool-output';
+  outlineOutput.replaceChildren(createOutlineList(data.outline));
+  if (data.warnings.length) {
+    const warningBox = document.createElement('div');
+    warningBox.className = 'warning-list';
+    const heading = document.createElement('h3');
+    heading.textContent = 'Warnings';
+    warningBox.append(heading);
+    data.warnings.forEach(warning => {
+      const item = document.createElement('p');
+      item.textContent = warning.detail;
+      warningBox.append(item);
+    });
+    outlineOutput.append(warningBox);
+  }
+  outlineWarningCount.textContent = `${data.warnings.length} ${data.warnings.length === 1 ? 'warning' : 'warnings'}`;
+}
+
+function showCompliance(data) {
+  complianceOutput.className = 'tool-output';
+  complianceOutput.replaceChildren();
+  if (!data.matrix.length) {
+    complianceOutput.className = 'tool-output empty-state compact-empty';
+    complianceOutput.innerHTML = '<h3>No matrix built</h3><p>Extract requirements from the RFP and paste proposal text first.</p>';
+    complianceFlag.textContent = 'Not checked';
+    return;
+  }
+  data.matrix.forEach(({requirement_id, status, confidence, matched_passage, similarity_score, note}) => {
+    const card = document.createElement('article');
+    card.className = 'requirement-card';
+    const badge = document.createElement('span');
+    badge.className = `status-badge ${status === 'met' ? 'required' : 'optional'}`;
+    badge.textContent = status.replaceAll('_', ' ');
+    const title = document.createElement('h3');
+    title.textContent = requirement_id;
+    const meta = document.createElement('span');
+    meta.textContent = `${confidence} confidence · score ${Number(similarity_score).toFixed(2)}`;
+    const body = document.createElement('p');
+    body.textContent = matched_passage || 'No matching proposal passage found.';
+    card.append(badge, title, meta, body);
+    if (note) {
+      const noteText = document.createElement('p');
+      noteText.className = 'muted-note';
+      noteText.textContent = note;
+      card.append(noteText);
+    }
+    complianceOutput.append(card);
+  });
+  complianceFlag.textContent = data.overall_flag.replaceAll('_', ' ');
+}
+
 async function analyze() {
   const rfpText = textArea.value.trim();
   analyzeButton.disabled = true;
@@ -276,11 +404,101 @@ async function extractRequirements() {
   }
 }
 
+async function resolveAmendments() {
+  amendmentButton.disabled = true;
+  amendmentButton.querySelector('span').textContent = 'Resolving…';
+  try {
+    const response = await fetch('/resolve-amendments', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        original_text: textArea.value,
+        amendments: [{amendment_number: 1, date: new Date().toISOString().slice(0, 10), text: amendmentText.value}]
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not resolve amendments.');
+    showAmendments(data);
+  } catch (error) {
+    amendmentOutput.className = 'tool-output';
+    amendmentOutput.innerHTML = `<p class="error">${error.message}</p>`;
+    amendmentCount.textContent = 'Error';
+  } finally {
+    amendmentButton.disabled = false;
+    amendmentButton.querySelector('span').textContent = 'Resolve amendments';
+  }
+}
+
+async function buildOutline() {
+  outlineButton.disabled = true;
+  outlineButton.querySelector('span').textContent = 'Building…';
+  try {
+    const response = await fetch('/reconstruct-outline', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({document_text: textArea.value})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not build outline.');
+    showOutline(data);
+  } catch (error) {
+    outlineOutput.className = 'tool-output';
+    outlineOutput.innerHTML = `<p class="error">${error.message}</p>`;
+    outlineWarningCount.textContent = 'Error';
+  } finally {
+    outlineButton.disabled = false;
+    outlineButton.querySelector('span').textContent = 'Build outline';
+  }
+}
+
+async function buildCompliance() {
+  complianceButton.disabled = true;
+  complianceButton.querySelector('span').textContent = 'Building…';
+  try {
+    const requirementResponse = await fetch('/extract-requirements', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rfp_text: textArea.value})
+    });
+    const requirementData = await requirementResponse.json();
+    if (!requirementResponse.ok) throw new Error(requirementData.detail || 'Could not extract requirements.');
+    const requirements = requirementData.requirements.map((requirement, index) => ({
+      id: `req-${index + 1}`,
+      text: requirement.detail,
+      mandatory: requirement.mandatory
+    }));
+    const response = await fetch('/build-compliance-matrix', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({requirements, proposal_text: proposalText.value})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not build compliance matrix.');
+    showCompliance(data);
+  } catch (error) {
+    complianceOutput.className = 'tool-output';
+    complianceOutput.innerHTML = `<p class="error">${error.message}</p>`;
+    complianceFlag.textContent = 'Error';
+  } finally {
+    complianceButton.disabled = false;
+    complianceButton.querySelector('span').textContent = 'Build matrix';
+  }
+}
+
 textArea.addEventListener('input', updateCount);
 analyzeButton.addEventListener('click', analyze);
 segmentButton.addEventListener('click', segmentRfp);
 questionButton.addEventListener('click', searchRfpQuestion);
 requirementsButton.addEventListener('click', extractRequirements);
-sampleButton.addEventListener('click', () => { textArea.value = sample; updateCount(); textArea.focus(); });
+amendmentButton.addEventListener('click', resolveAmendments);
+outlineButton.addEventListener('click', buildOutline);
+complianceButton.addEventListener('click', buildCompliance);
+sampleButton.addEventListener('click', () => {
+  textArea.value = sample;
+  amendmentText.value = sampleAmendment;
+  proposalText.value = sampleProposal;
+  updateCount();
+  textArea.focus();
+});
 textArea.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') analyze(); });
 rfpQuestion.addEventListener('keydown', event => { if (event.key === 'Enter') searchRfpQuestion(); });

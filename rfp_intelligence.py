@@ -542,3 +542,353 @@ def extract_requirement_checklist(text: str) -> list[dict[str, Any]]:
             }
         )
     return requirements
+
+
+def _numbered_sections(text: str) -> dict[str, dict[str, Any]]:
+    """Extract numbered sections such as 4.2 Insurance Requirements from RFP text."""
+    lines = text.splitlines()
+    found: list[tuple[int, str, str]] = []
+    pattern = re.compile(
+        r"^\s*(?:section\s+)?(?P<section>\d+(?:\.\d+)*)[\).:\s-]+(?P<heading>[A-Za-z][A-Za-z0-9&/(),'\-\s]{0,80})\s*$",
+        flags=re.IGNORECASE,
+    )
+    for index, line in enumerate(lines, start=1):
+        match = pattern.match(line.strip())
+        if match and not line.strip().endswith((".", "?", "!")):
+            found.append((index, match.group("section"), match.group("heading").strip(" :-")))
+
+    sections: dict[str, dict[str, Any]] = {}
+    for position, (line_number, section, heading) in enumerate(found):
+        next_line = found[position + 1][0] if position + 1 < len(found) else len(lines) + 1
+        body = "\n".join(lines[line_number: next_line - 1]).strip()
+        sections[section] = {
+            "section": section,
+            "heading": heading,
+            "text": body,
+            "status": "original",
+            "modified_by_amendment": None,
+        }
+    return sections
+
+
+def _parse_amendment_actions(amendment: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    text = str(amendment.get("text", "")).strip()
+    if not text:
+        return [], []
+    number = int(amendment.get("amendment_number", 0) or 0)
+    date = str(amendment.get("date", "")).strip()
+    actions: list[dict[str, Any]] = []
+    matched_spans: list[tuple[int, int]] = []
+
+    action_patterns = [
+        (
+            "struck",
+            re.compile(
+                r"(?:Section\s+)?(?P<section>\d+(?:\.\d+)*)(?:\s*\((?P<heading>[^)]+)\))?\s+is\s+(?:struck|deleted|removed)(?:\s+in\s+its\s+entirety)?",
+                flags=re.IGNORECASE,
+            ),
+        ),
+        (
+            "modified",
+            re.compile(
+                r"(?:Section\s+)?(?P<section>\d+(?:\.\d+)*)(?:\s*\((?P<heading>[^)]+)\))?\s+is\s+(?:revised|modified|amended)(?:\s+to\s+read)?\s*:?\s*[\"'“‘]?(?P<text>[^\"'”’]+)",
+                flags=re.IGNORECASE,
+            ),
+        ),
+        (
+            "added",
+            re.compile(
+                r"(?:a\s+)?new\s+Section\s+(?P<section>\d+(?:\.\d+)*)(?:\s*\((?P<heading>[^)]+)\))?\s+is\s+added(?:\s+to\s+read)?\s*:?\s*[\"'“‘]?(?P<text>[^\"'”’]+)",
+                flags=re.IGNORECASE,
+            ),
+        ),
+    ]
+
+    for action, pattern in action_patterns:
+        for match in pattern.finditer(text):
+            matched_spans.append(match.span())
+            actions.append(
+                {
+                    "amendment_number": number,
+                    "date": date,
+                    "section": match.group("section"),
+                    "heading": (match.groupdict().get("heading") or "").strip(),
+                    "action": action,
+                    "text": (match.groupdict().get("text") or "").strip(" ."),
+                }
+            )
+
+    unmatched: list[str] = []
+    if not actions:
+        unmatched.append(text)
+    return actions, unmatched
+
+
+def resolve_amendments(original_text: str, amendments: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply amendment actions to an original RFP and return effective text plus changelog."""
+    sections = _numbered_sections(original_text)
+    if not sections and original_text.strip():
+        sections["DOCUMENT"] = {
+            "section": "DOCUMENT",
+            "heading": "Document",
+            "text": original_text.strip(),
+            "status": "original",
+            "modified_by_amendment": None,
+        }
+
+    changelog: list[dict[str, Any]] = []
+    unmatched: list[str] = []
+    ordered = sorted(enumerate(amendments), key=lambda item: (str(item[1].get("date", "")), item[0]))
+    for _position, amendment in ordered:
+        actions, action_unmatched = _parse_amendment_actions(amendment)
+        unmatched.extend(action_unmatched)
+        for action in actions:
+            section_id = action["section"]
+            action_type = action["action"]
+            exists = section_id in sections
+            if action_type == "added" and exists:
+                unmatched.append(
+                    f"Amendment {action['amendment_number']} says Section {section_id} is new, but that section already exists."
+                )
+                continue
+            if action_type in {"modified", "struck"} and not exists:
+                unmatched.append(
+                    f"Amendment {action['amendment_number']} references Section {section_id}, but no matching original section was found."
+                )
+                continue
+
+            if action_type == "added":
+                sections[section_id] = {
+                    "section": section_id,
+                    "heading": action["heading"] or f"Section {section_id}",
+                    "text": action["text"],
+                    "status": "added",
+                    "modified_by_amendment": action["amendment_number"],
+                }
+            elif action_type == "modified":
+                sections[section_id].update(
+                    {
+                        "heading": action["heading"] or sections[section_id]["heading"],
+                        "text": action["text"],
+                        "status": "modified",
+                        "modified_by_amendment": action["amendment_number"],
+                    }
+                )
+            elif action_type == "struck":
+                sections[section_id].update(
+                    {"text": None, "status": "struck", "modified_by_amendment": action["amendment_number"]}
+                )
+            changelog.append(
+                {
+                    "amendment_number": action["amendment_number"],
+                    "date": action["date"],
+                    "section": section_id,
+                    "action": action_type,
+                }
+            )
+
+    def sort_key(item: dict[str, Any]) -> tuple[int, list[int] | list[str]]:
+        section = str(item["section"])
+        if section == "DOCUMENT":
+            return (0, [0])
+        return (1, [int(part) for part in section.split(".") if part.isdigit()])
+
+    effective_sections = sorted(sections.values(), key=sort_key)
+    return {"effective_sections": effective_sections, "changelog": changelog, "unmatched_amendment_text": unmatched}
+
+
+def _outline_heading(line: str) -> dict[str, Any] | None:
+    match = re.match(
+        r"^\s*(?P<number>(?:\d+(?:\.\d+)*|[a-zA-Z]|[ivxlcdmIVXLCDM]+))\s*[\).:-]?\s+(?P<heading>.+?)\s*$",
+        line,
+    )
+    if not match:
+        return None
+    number = match.group("number").rstrip(".")
+    heading = match.group("heading").strip(" :-")
+    if not heading:
+        heading = "(missing heading text)"
+    if re.fullmatch(r"\d+(?:\.\d+)*", number):
+        depth = number.count(".") + 1
+        numeric_parts = [int(part) for part in number.split(".")]
+        kind = "numeric"
+    elif re.fullmatch(r"[a-zA-Z]", number):
+        depth = 2
+        numeric_parts = [ord(number.lower()) - 96]
+        kind = "alpha"
+    else:
+        depth = 3
+        roman = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
+        numeric_parts = [roman.get(number.lower(), 0)]
+        kind = "roman"
+    return {"number": number, "heading": heading, "depth": depth, "children": [], "text": "", "_parts": numeric_parts, "_kind": kind}
+
+
+def reconstruct_outline(document_text: str) -> dict[str, Any]:
+    """Build a nested outline tree and flag numbering issues."""
+    lines = document_text.splitlines()
+    flat: list[dict[str, Any]] = []
+    warnings: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(lines, start=1):
+        node = _outline_heading(line)
+        if not node:
+            continue
+        node["line_number"] = line_number
+        if node["number"] in seen:
+            warnings.append({"type": "duplicate_number", "location": node["number"], "detail": f"{node['number']} appears more than once."})
+        seen.add(node["number"])
+        flat.append(node)
+
+    if not flat:
+        return {"outline": [], "warnings": []}
+
+    for index, node in enumerate(flat):
+        next_line = flat[index + 1]["line_number"] if index + 1 < len(flat) else len(lines) + 1
+        body = "\n".join(lines[node["line_number"]: next_line - 1]).strip()
+        node["text"] = body
+
+    last_at_depth: dict[int, dict[str, Any]] = {}
+    roots: list[dict[str, Any]] = []
+    for node in flat:
+        depth = int(node["depth"])
+        if depth > 1 and depth - 1 not in last_at_depth:
+            warnings.append(
+                {
+                    "type": "depth_jump",
+                    "location": node["number"],
+                    "detail": f"{node['number']} appears before a parent heading at depth {depth - 1}.",
+                }
+            )
+        previous = last_at_depth.get(depth)
+        if previous and node["_kind"] == previous["_kind"]:
+            expected = previous["_parts"][-1] + 1
+            actual = node["_parts"][-1]
+            same_parent = (
+                node["_kind"] != "numeric"
+                or node["number"].split(".")[:-1] == previous["number"].split(".")[:-1]
+            )
+            if same_parent and actual > expected:
+                expected_number = ".".join([*node["number"].split(".")[:-1], str(expected)]).strip(".")
+                warnings.append(
+                    {
+                        "type": "skipped_number",
+                        "location": node["number"],
+                        "detail": f"Expected {expected_number} before {node['number']}, but it's missing.",
+                    }
+                )
+        parent = last_at_depth.get(depth - 1)
+        public_node = {
+            "number": node["number"],
+            "heading": node["heading"],
+            "depth": depth,
+            "text": node["text"],
+            "children": [],
+        }
+        node["_public"] = public_node
+        if parent:
+            parent["_public"]["children"].append(public_node)
+        else:
+            roots.append(public_node)
+        last_at_depth[depth] = node
+        for stale_depth in [existing for existing in last_at_depth if existing > depth]:
+            last_at_depth.pop(stale_depth)
+
+    first = flat[0]
+    if first["_kind"] == "numeric" and first["_parts"][0] != 1:
+        warnings.insert(
+            0,
+            {
+                "type": "starts_after_one",
+                "location": first["number"],
+                "detail": f"Document starts at {first['number']} instead of 1.",
+            },
+        )
+    return {"outline": roots, "warnings": warnings}
+
+
+def _extract_numbers(text: str) -> list[float]:
+    return [float(value.replace(",", "")) for value in re.findall(r"\b\d+(?:,\d{3})*(?:\.\d+)?\b", text)]
+
+
+def _hours_from_text(text: str) -> float | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s*[- ]?(?:hour|hr|minute|min)", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit_text = match.group(0).lower()
+    return value / 60 if "minute" in unit_text or "min" in unit_text else value
+
+
+def _years_from_text(text: str) -> float | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s+years?", text, flags=re.IGNORECASE)
+    return float(match.group(1)) if match else None
+
+
+def _classify_compliance(requirement: str, passage: str, score: float) -> tuple[str, str, str]:
+    req_lower = requirement.lower()
+    passage_lower = passage.lower()
+    note = ""
+    if not passage or score < 0.08:
+        return "not_addressed", "high", note
+
+    req_hours = _hours_from_text(requirement)
+    passage_hours = _hours_from_text(passage)
+    if req_hours is not None and passage_hours is not None:
+        if passage_hours <= req_hours:
+            return "met", "high", note
+        return "partially_met", "medium", "The proposal mentions response time, but the stated time is slower than required."
+
+    req_years = _years_from_text(requirement)
+    passage_years = _years_from_text(passage)
+    if req_years is not None and passage_years is not None:
+        if passage_years >= req_years and "first government" not in passage_lower:
+            return "met", "high", note
+        return "not_met", "medium", "The passage is related, but it does not satisfy the required years or government experience."
+
+    negative_signals = ("not", "no ", "without", "first government", "does not", "cannot")
+    if any(signal in passage_lower for signal in negative_signals):
+        return "partially_met", "medium", "The passage is related but includes limiting or contradictory language."
+    if score >= 0.35 or all(token in passage_lower for token in _tokenize(req_lower)[:3]):
+        return "met", "medium", note
+    if score >= 0.16:
+        return "partially_met", "medium", note
+    return "not_addressed", "high", note
+
+
+def build_compliance_matrix(requirements: list[dict[str, Any]], proposal_text: str) -> dict[str, Any]:
+    """Score proposal passages against requirement checklist items."""
+    matrix: list[dict[str, Any]] = []
+    for index, requirement in enumerate(requirements, start=1):
+        requirement_id = str(requirement.get("id") or f"req-{index}")
+        requirement_text = str(requirement.get("text", "")).strip()
+        mandatory = bool(requirement.get("mandatory", False))
+        matches = search_rfp_clauses(proposal_text, requirement_text, top_k=1) if requirement_text and proposal_text.strip() else []
+        best = matches[0] if matches else {"text": "", "score": 0.0}
+        status, confidence, note = _classify_compliance(requirement_text, best["text"], float(best["score"]))
+        row = {
+            "requirement_id": requirement_id,
+            "status": status,
+            "confidence": confidence,
+            "matched_passage": best["text"] or None,
+            "similarity_score": round(float(best["score"]), 4),
+        }
+        if note:
+            row["note"] = note
+        matrix.append({**row, "_mandatory": mandatory})
+
+    mandatory_rows = [row for row in matrix if row.pop("_mandatory")]
+    mandatory_total = len(mandatory_rows)
+    mandatory_met = sum(1 for row in mandatory_rows if row["status"] == "met")
+    if mandatory_total == 0:
+        overall_flag = "no_mandatory_requirements"
+    elif mandatory_met == mandatory_total:
+        overall_flag = "passes_mandatory_requirements"
+    else:
+        overall_flag = "fails_mandatory_requirements"
+    return {
+        "matrix": matrix,
+        "mandatory_requirements_met": mandatory_met,
+        "mandatory_requirements_total": mandatory_total,
+        "overall_flag": overall_flag,
+    }

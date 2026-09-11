@@ -340,7 +340,7 @@ function showCompliance(data) {
 
 function updateDocumentStatus() {
   if (!uploadedDocuments.length) {
-    documentStatus.textContent = 'You can upload one RFP PDF, or upload two PDFs to make a joint summary.';
+    documentStatus.textContent = 'No PDFs loaded yet.';
     return;
   }
   const names = uploadedDocuments.map(document => document.name).join(', ');
@@ -370,7 +370,7 @@ function showIndividualSummaries(items) {
   summary.className = 'summary';
   summary.replaceChildren();
   if (!items.length) {
-    return showEmptySummary('Upload PDFs first, then click Individual summaries.');
+    return showEmptySummary('Upload PDFs first, then click Each PDF.');
   }
   items.forEach(({name, summary: summaryText}) => {
     const card = document.createElement('article');
@@ -473,7 +473,7 @@ async function readPdfs() {
 
 async function summarizeIndividualPdfs() {
   if (!uploadedDocuments.length) {
-    showEmptySummary('Upload PDFs first, then click Individual summaries.');
+    showEmptySummary('Upload PDFs first, then click Each PDF.');
     return;
   }
   individualSummaryButton.disabled = true;
@@ -496,7 +496,7 @@ async function summarizeIndividualPdfs() {
     summary.innerHTML = `<p class="error">${error.message}</p>`;
   } finally {
     individualSummaryButton.disabled = false;
-    individualSummaryButton.textContent = 'Individual summaries';
+    individualSummaryButton.textContent = 'Each PDF';
   }
 }
 
@@ -505,14 +505,14 @@ async function analyze() {
   analyzeButton.disabled = true;
   analyzeButton.querySelector('span').textContent = 'Reading…';
   try {
-    showEmptySummary('Reading the RFP and writing a plain-English overview…');
+    showEmptySummary('Writing a plain-English overview…');
     const response = await fetch('/extract-glossary', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({rfp_text: rfpText})
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Could not build the glossary.');
+    if (!response.ok) throw new Error(data.detail || 'Could not analyze the documents.');
     showSummary(data.summary);
     showTerms(data.terms);
   } catch (error) {
@@ -523,7 +523,7 @@ async function analyze() {
     termCount.textContent = 'Error';
   } finally {
     analyzeButton.disabled = false;
-    analyzeButton.querySelector('span').textContent = 'Build glossary';
+    analyzeButton.querySelector('span').textContent = 'Analyze';
   }
 }
 
@@ -544,7 +544,7 @@ async function segmentRfp() {
     sectionsOutput.innerHTML = `<p class="error">${error.message}</p>`;
   } finally {
     segmentButton.disabled = false;
-    segmentButton.textContent = 'Split sections';
+    segmentButton.textContent = 'Split';
   }
 }
 
@@ -576,7 +576,7 @@ async function searchRfpQuestion() {
     answerConfidence.textContent = 'Error';
   } finally {
     questionButton.disabled = false;
-    questionButton.querySelector('span').textContent = 'Search RFP';
+    questionButton.querySelector('span').textContent = 'Search';
   }
 }
 
@@ -598,7 +598,7 @@ async function extractRequirements() {
     requirementCount.textContent = 'Error';
   } finally {
     requirementsButton.disabled = false;
-    requirementsButton.querySelector('span').textContent = 'Extract checklist';
+    requirementsButton.querySelector('span').textContent = 'Extract';
   }
 }
 
@@ -646,7 +646,7 @@ async function buildOutline() {
     outlineWarningCount.textContent = 'Error';
   } finally {
     outlineButton.disabled = false;
-    outlineButton.querySelector('span').textContent = 'Build outline';
+    outlineButton.querySelector('span').textContent = 'Build';
   }
 }
 
@@ -680,7 +680,7 @@ async function buildCompliance() {
     complianceFlag.textContent = 'Error';
   } finally {
     complianceButton.disabled = false;
-    complianceButton.querySelector('span').textContent = 'Build matrix';
+    complianceButton.querySelector('span').textContent = 'Compare';
   }
 }
 

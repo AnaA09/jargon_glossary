@@ -378,3 +378,111 @@ def test_build_compliance_matrix_handles_no_mandatory_requirements():
     data = response.json()
     assert data["mandatory_requirements_total"] == 0
     assert data["overall_flag"] == "no_mandatory_requirements"
+
+
+def test_ocr_pdf_uses_mistral_key_and_returns_page_text(monkeypatch):
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"pages": [{"markdown": "Page one text."}, {"markdown": "Page two text."}]}).encode()
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "https://api.mistral.ai/v1/ocr"
+        assert request.get_header("Authorization") == "Bearer test-mistral-key"
+        assert timeout == 90
+        body = json.loads(request.data)
+        assert body["model"] == "mistral-ocr-latest"
+        assert body["document"]["type"] == "document_url"
+        assert body["document"]["document_url"].startswith("data:application/pdf;base64,")
+        return FakeResponse()
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        response = client.post("/ocr-pdf", json={"filename": "rfp.pdf", "content_base64": "JVBERi0x"})
+
+    assert response.status_code == 200
+    assert response.json() == {"filename": "rfp.pdf", "text": "Page one text.\n\nPage two text.", "page_count": 2}
+
+
+def test_ocr_pdf_reports_missing_mistral_key(monkeypatch):
+    monkeypatch.setenv("MISTRAL_API_KEY", "")
+    response = client.post("/ocr-pdf", json={"filename": "rfp.pdf", "content_base64": "JVBERi0x"})
+    assert response.status_code == 502
+    assert "Mistral API key is not configured" in response.json()["detail"]
+
+
+def test_joint_summary_combines_documents_in_local_mode():
+    response = client.post(
+        "/joint-summary",
+        json={
+            "documents": [
+                {
+                    "name": "Original RFP",
+                    "text": "The vendor must submit proposals by August 15, 2026. Insurance of $1,000,000 is required.",
+                },
+                {
+                    "name": "Amendment 1",
+                    "text": "Amendment 1 revised the due date to July 15, 2026 and requires insurance of $2,000,000.",
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["document_count"] == 2
+    assert "read together" in data["summary"]
+    assert data["key_points"]
+    assert any("July 15, 2026" in item for item in data["differences"])
+
+
+def test_joint_summary_uses_openrouter_when_configured(monkeypatch):
+    monkeypatch.delenv("GLOSSARY_MODE", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-mistral-key")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            content = json.dumps(
+                {
+                    "summary": "The original RFP and amendment should be read together.",
+                    "key_points": ["The vendor must submit a proposal."],
+                    "differences": ["The amendment changes the deadline."],
+                }
+            )
+            return json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "https://openrouter.ai/api/v1/chat/completions"
+        assert request.get_header("Authorization") == "Bearer test-openrouter-key"
+        body = json.loads(request.data)
+        assert "Create a joint summary" in body["messages"][0]["content"]
+        assert "Original RFP" in body["messages"][1]["content"]
+        return FakeResponse()
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        response = client.post(
+            "/joint-summary",
+            json={
+                "documents": [
+                    {"name": "Original RFP", "text": "The vendor must submit by August 15, 2026."},
+                    {"name": "Amendment", "text": "The due date is revised to July 15, 2026."},
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"] == "The original RFP and amendment should be read together."
+    assert data["document_count"] == 2

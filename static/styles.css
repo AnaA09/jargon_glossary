@@ -30,6 +30,9 @@ textarea { flex:1; width:100%; resize:none; min-height:320px; border:0; outline:
 textarea:focus { background:#fff; box-shadow:inset 0 0 0 2px var(--mint); }
 textarea::placeholder { color:#9aa39e; }
 .mini-textarea { flex:0 0 auto; min-height:115px; margin-bottom:14px; font-family:Manrope,Arial,sans-serif; line-height:1.55; }
+.upload-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px; }
+.file-picker { color:var(--green); background:#dfe9df; border-radius:999px; padding:8px 12px; cursor:pointer; font:600 12px Manrope,sans-serif; }
+#pdfFiles { width:1px; height:1px; opacity:0; position:absolute; pointer-events:none; }
 .input-footer,.search-row { display:flex; align-items:center; justify-content:space-between; margin-top:18px; }
 #charCount,.term-count { color:var(--muted); font:11px 'DM Mono',monospace; }
 .term-count { background:#dfe9df; border-radius:99px; padding:7px 10px; }
@@ -62,6 +65,9 @@ textarea::placeholder { color:#9aa39e; }
 .source-excerpt { padding-left:12px; border-left:3px solid var(--mint); }
 .matches-heading { color:var(--ink); font-size:14px; margin:18px 0 10px; }
 .muted-note { color:var(--muted); font-size:13px; line-height:1.6; }
+.upload-row + .muted-note { margin:9px 0 0; }
+.plain-list { margin:10px 0 0 18px; padding:0; color:#57645e; font-size:13px; line-height:1.65; }
+.plain-list li { margin-bottom:7px; }
 .outline-tree { margin:0 0 0 18px; padding:0; color:#57645e; font-size:13px; line-height:1.55; }
 .outline-tree .outline-tree { margin-top:8px; margin-bottom:8px; }
 .outline-tree li { margin:0 0 10px; }

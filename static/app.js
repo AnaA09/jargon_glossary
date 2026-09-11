@@ -1,6 +1,9 @@
 const textArea = document.querySelector('#rfpText');
 const analyzeButton = document.querySelector('#analyzeButton');
 const sampleButton = document.querySelector('#sampleButton');
+const pdfFiles = document.querySelector('#pdfFiles');
+const ocrButton = document.querySelector('#ocrButton');
+const individualSummaryButton = document.querySelector('#individualSummaryButton');
 const segmentButton = document.querySelector('#segmentButton');
 const questionButton = document.querySelector('#questionButton');
 const requirementsButton = document.querySelector('#requirementsButton');
@@ -16,7 +19,6 @@ const amendmentOutput = document.querySelector('#amendmentOutput');
 const outlineOutput = document.querySelector('#outlineOutput');
 const complianceOutput = document.querySelector('#complianceOutput');
 const rfpQuestion = document.querySelector('#rfpQuestion');
-const amendmentText = document.querySelector('#amendmentText');
 const proposalText = document.querySelector('#proposalText');
 const charCount = document.querySelector('#charCount');
 const termCount = document.querySelector('#termCount');
@@ -25,6 +27,8 @@ const requirementCount = document.querySelector('#requirementCount');
 const amendmentCount = document.querySelector('#amendmentCount');
 const outlineWarningCount = document.querySelector('#outlineWarningCount');
 const complianceFlag = document.querySelector('#complianceFlag');
+const documentStatus = document.querySelector('#documentStatus');
+let uploadedDocuments = [];
 
 const sample = `SECTION 1: SCOPE OF WORK
 The COTR shall coordinate with the PWS-designated TPOC to ensure all deliverables comply with FAR Part 15 and applicable DFARS clauses prior to CPARS submission.
@@ -44,6 +48,38 @@ Our transition manager can provide a transition plan after award.`;
 
 function updateCount() {
   charCount.textContent = `${textArea.value.length.toLocaleString()} characters`;
+}
+
+function combinedDocumentText(documents = uploadedDocuments) {
+  return documents
+    .filter(document => document.text && document.text.trim())
+    .map(document => `===== ${document.name} =====\n${document.text.trim()}`)
+    .join('\n\n');
+}
+
+function analysisText() {
+  return uploadedDocuments.length ? combinedDocumentText() : textArea.value;
+}
+
+function documentsFromCombinedText() {
+  const text = textArea.value.trim();
+  if (!text) return [];
+  const documentPattern = /^===== (.+?) =====\n([\s\S]*?)(?=^===== .+? =====\n|\s*$)/gm;
+  const documents = [];
+  let match;
+  while ((match = documentPattern.exec(text)) !== null) {
+    const name = match[1].trim();
+    const body = match[2].trim();
+    if (name && body) documents.push({name, text: body});
+  }
+  return documents;
+}
+
+function jointSummaryDocuments() {
+  if (uploadedDocuments.length >= 2) return uploadedDocuments;
+  const parsedDocuments = documentsFromCombinedText();
+  if (parsedDocuments.length >= 2) return parsedDocuments;
+  return [];
 }
 
 function showEmpty(message = 'No specialized jargon was found in this text.') {
@@ -302,8 +338,170 @@ function showCompliance(data) {
   complianceFlag.textContent = data.overall_flag.replaceAll('_', ' ');
 }
 
+function updateDocumentStatus() {
+  if (!uploadedDocuments.length) {
+    documentStatus.textContent = 'You can upload one RFP PDF, or upload two PDFs to make a joint summary.';
+    return;
+  }
+  const names = uploadedDocuments.map(document => document.name).join(', ');
+  documentStatus.textContent = `${uploadedDocuments.length} PDF ${uploadedDocuments.length === 1 ? 'document' : 'documents'} ready: ${names}`;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.includes(',') ? result.split(',')[1] : result);
+    };
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function placeUploadedDocuments() {
+  if (!uploadedDocuments.length) return;
+  textArea.value = combinedDocumentText();
+  updateCount();
+  updateDocumentStatus();
+}
+
+function showIndividualSummaries(items) {
+  summary.className = 'summary';
+  summary.replaceChildren();
+  if (!items.length) {
+    return showEmptySummary('Upload PDFs first, then click Individual summaries.');
+  }
+  items.forEach(({name, summary: summaryText}) => {
+    const card = document.createElement('article');
+    card.className = 'summary-card';
+    const heading = document.createElement('h3');
+    heading.textContent = name;
+    const body = document.createElement('p');
+    body.textContent = summaryText || 'No summary was generated for this PDF.';
+    card.append(heading, body);
+    summary.append(card);
+  });
+}
+
+function showJointSummary(data) {
+  amendmentOutput.className = 'tool-output';
+  amendmentOutput.replaceChildren();
+  if (!data.summary) {
+    amendmentOutput.className = 'tool-output empty-state compact-empty';
+    amendmentOutput.innerHTML = '<h3>No joint summary yet</h3><p>Add at least one RFP or amendment document first.</p>';
+    amendmentCount.textContent = '0 docs';
+    return;
+  }
+
+  const summaryCard = document.createElement('article');
+  summaryCard.className = 'answer-card';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Combined plain-English summary';
+  const body = document.createElement('p');
+  body.textContent = data.summary;
+  summaryCard.append(heading, body);
+  amendmentOutput.append(summaryCard);
+
+  if ((data.key_points || []).length) {
+    const pointsCard = document.createElement('article');
+    pointsCard.className = 'requirement-card';
+    const pointsHeading = document.createElement('h3');
+    pointsHeading.textContent = 'Important points';
+    const list = document.createElement('ul');
+    list.className = 'plain-list';
+    data.key_points.forEach(point => {
+      const item = document.createElement('li');
+      item.textContent = point;
+      list.append(item);
+    });
+    pointsCard.append(pointsHeading, list);
+    amendmentOutput.append(pointsCard);
+  }
+
+  if ((data.differences || []).length) {
+    const changesCard = document.createElement('article');
+    changesCard.className = 'requirement-card';
+    const changesHeading = document.createElement('h3');
+    changesHeading.textContent = 'Updates or differences to review';
+    const list = document.createElement('ul');
+    list.className = 'plain-list';
+    data.differences.forEach(change => {
+      const item = document.createElement('li');
+      item.textContent = change;
+      list.append(item);
+    });
+    changesCard.append(changesHeading, list);
+    amendmentOutput.append(changesCard);
+  }
+  amendmentCount.textContent = `${data.document_count || 0} ${data.document_count === 1 ? 'doc' : 'docs'}`;
+}
+
+async function readPdfs() {
+  const files = Array.from(pdfFiles.files || []);
+  if (!files.length) {
+    documentStatus.textContent = 'Choose one or more PDF files first.';
+    return;
+  }
+  uploadedDocuments = [];
+  ocrButton.disabled = true;
+  ocrButton.textContent = 'Reading PDFs…';
+  documentStatus.textContent = 'Sending PDFs to Mistral OCR. This can take a moment.';
+  try {
+    for (const file of files) {
+      const contentBase64 = await fileToBase64(file);
+      const response = await fetch('/ocr-pdf', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename: file.name, content_base64: contentBase64})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Could not read ${file.name}.`);
+      uploadedDocuments.push({name: data.filename, text: data.text});
+    }
+    placeUploadedDocuments();
+    if (uploadedDocuments.length > 1) {
+      amendmentCount.textContent = `${uploadedDocuments.length} docs`;
+    }
+  } catch (error) {
+    documentStatus.textContent = error.message;
+  } finally {
+    ocrButton.disabled = false;
+    ocrButton.textContent = 'Read PDFs';
+  }
+}
+
+async function summarizeIndividualPdfs() {
+  if (!uploadedDocuments.length) {
+    showEmptySummary('Upload PDFs first, then click Individual summaries.');
+    return;
+  }
+  individualSummaryButton.disabled = true;
+  individualSummaryButton.textContent = 'Summarizing…';
+  try {
+    const summaries = [];
+    for (const document of uploadedDocuments) {
+      const response = await fetch('/extract-glossary', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rfp_text: document.text})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Could not summarize ${document.name}.`);
+      summaries.push({name: document.name, summary: data.summary});
+    }
+    showIndividualSummaries(summaries);
+  } catch (error) {
+    summary.className = 'summary';
+    summary.innerHTML = `<p class="error">${error.message}</p>`;
+  } finally {
+    individualSummaryButton.disabled = false;
+    individualSummaryButton.textContent = 'Individual summaries';
+  }
+}
+
 async function analyze() {
-  const rfpText = textArea.value.trim();
+  const rfpText = analysisText().trim();
   analyzeButton.disabled = true;
   analyzeButton.querySelector('span').textContent = 'Reading…';
   try {
@@ -336,7 +534,7 @@ async function segmentRfp() {
     const response = await fetch('/segment-rfp', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rfp_text: textArea.value})
+      body: JSON.stringify({rfp_text: analysisText()})
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Could not split sections.');
@@ -359,12 +557,12 @@ async function searchRfpQuestion() {
       fetch('/ask-rfp', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({rfp_text: textArea.value, question})
+        body: JSON.stringify({rfp_text: analysisText(), question})
       }),
       fetch('/search-clauses', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({rfp_text: textArea.value, query: question, top_k: 3})
+        body: JSON.stringify({rfp_text: analysisText(), query: question, top_k: 3})
       })
     ]);
     const answerData = await answerResponse.json();
@@ -389,7 +587,7 @@ async function extractRequirements() {
     const response = await fetch('/extract-requirements', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rfp_text: textArea.value})
+      body: JSON.stringify({rfp_text: analysisText()})
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Could not extract requirements.');
@@ -406,26 +604,27 @@ async function extractRequirements() {
 
 async function resolveAmendments() {
   amendmentButton.disabled = true;
-  amendmentButton.querySelector('span').textContent = 'Resolving…';
+  amendmentButton.querySelector('span').textContent = 'Summarizing…';
   try {
-    const response = await fetch('/resolve-amendments', {
+    const documents = jointSummaryDocuments();
+    if (documents.length < 2) {
+      throw new Error('Upload at least two PDFs first, then click Read PDFs so both documents appear in the main text box.');
+    }
+    const response = await fetch('/joint-summary', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        original_text: textArea.value,
-        amendments: [{amendment_number: 1, date: new Date().toISOString().slice(0, 10), text: amendmentText.value}]
-      })
+      body: JSON.stringify({documents})
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Could not resolve amendments.');
-    showAmendments(data);
+    if (!response.ok) throw new Error(data.detail || 'Could not create a joint summary.');
+    showJointSummary(data);
   } catch (error) {
     amendmentOutput.className = 'tool-output';
     amendmentOutput.innerHTML = `<p class="error">${error.message}</p>`;
     amendmentCount.textContent = 'Error';
   } finally {
     amendmentButton.disabled = false;
-    amendmentButton.querySelector('span').textContent = 'Resolve amendments';
+    amendmentButton.querySelector('span').textContent = 'Create joint summary';
   }
 }
 
@@ -436,7 +635,7 @@ async function buildOutline() {
     const response = await fetch('/reconstruct-outline', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({document_text: textArea.value})
+      body: JSON.stringify({document_text: analysisText()})
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Could not build outline.');
@@ -458,7 +657,7 @@ async function buildCompliance() {
     const requirementResponse = await fetch('/extract-requirements', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rfp_text: textArea.value})
+      body: JSON.stringify({rfp_text: analysisText()})
     });
     const requirementData = await requirementResponse.json();
     if (!requirementResponse.ok) throw new Error(requirementData.detail || 'Could not extract requirements.');
@@ -487,6 +686,8 @@ async function buildCompliance() {
 
 textArea.addEventListener('input', updateCount);
 analyzeButton.addEventListener('click', analyze);
+ocrButton.addEventListener('click', readPdfs);
+individualSummaryButton.addEventListener('click', summarizeIndividualPdfs);
 segmentButton.addEventListener('click', segmentRfp);
 questionButton.addEventListener('click', searchRfpQuestion);
 requirementsButton.addEventListener('click', extractRequirements);
@@ -494,11 +695,23 @@ amendmentButton.addEventListener('click', resolveAmendments);
 outlineButton.addEventListener('click', buildOutline);
 complianceButton.addEventListener('click', buildCompliance);
 sampleButton.addEventListener('click', () => {
-  textArea.value = sample;
-  amendmentText.value = sampleAmendment;
+  uploadedDocuments = [
+    {name: 'demo_original_rfp.pdf', text: sample},
+    {name: 'demo_amendment_rfp.pdf', text: sampleAmendment}
+  ];
+  textArea.value = combinedDocumentText();
   proposalText.value = sampleProposal;
   updateCount();
+  updateDocumentStatus();
+  amendmentCount.textContent = `${uploadedDocuments.length} docs`;
   textArea.focus();
 });
 textArea.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') analyze(); });
 rfpQuestion.addEventListener('keydown', event => { if (event.key === 'Enter') searchRfpQuestion(); });
+pdfFiles.addEventListener('change', () => {
+  uploadedDocuments = [];
+  updateDocumentStatus();
+  if (pdfFiles.files.length) {
+    documentStatus.textContent = `${pdfFiles.files.length} PDF ${pdfFiles.files.length === 1 ? 'selected' : 'files selected'}. Click “Read PDFs” to extract the text.`;
+  }
+});

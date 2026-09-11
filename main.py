@@ -1,5 +1,6 @@
 """FastAPI application for the RFP jargon glossary."""
 
+import asyncio
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,7 +15,9 @@ from rfp_intelligence import (
     analyze_rfp_sections,
     answer_rfp_question,
     build_compliance_matrix,
+    create_joint_summary,
     extract_requirement_checklist,
+    mistral_ocr_pdf,
     reconstruct_outline,
     resolve_amendments,
 )
@@ -22,6 +25,7 @@ from rfp_intelligence import (
 
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
+MAX_DOCUMENT_TEXT_LENGTH = 300_000
 
 app = FastAPI(
     title="jargon_glossary",
@@ -32,7 +36,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 class GlossaryRequest(BaseModel):
-    rfp_text: str = Field(default="", max_length=100_000)
+    rfp_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
 
 
 class Term(BaseModel):
@@ -46,7 +50,7 @@ class GlossaryResponse(BaseModel):
 
 
 class SegmentRequest(BaseModel):
-    rfp_text: str = Field(default="", max_length=100_000)
+    rfp_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
 
 
 class Section(BaseModel):
@@ -61,7 +65,7 @@ class SegmentResponse(BaseModel):
 
 
 class ClauseSearchRequest(BaseModel):
-    rfp_text: str = Field(default="", max_length=100_000)
+    rfp_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
     query: str = Field(default="", max_length=500)
     top_k: int = Field(default=3, ge=1, le=10)
 
@@ -76,7 +80,7 @@ class ClauseSearchResponse(BaseModel):
 
 
 class AskRfpRequest(BaseModel):
-    rfp_text: str = Field(default="", max_length=100_000)
+    rfp_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
     question: str = Field(default="", max_length=500)
 
 
@@ -87,7 +91,7 @@ class AskRfpResponse(BaseModel):
 
 
 class RequirementRequest(BaseModel):
-    rfp_text: str = Field(default="", max_length=100_000)
+    rfp_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
 
 
 class Requirement(BaseModel):
@@ -108,7 +112,7 @@ class Amendment(BaseModel):
 
 
 class ResolveAmendmentsRequest(BaseModel):
-    original_text: str = Field(default="", max_length=100_000)
+    original_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
     amendments: list[Amendment] = Field(default_factory=list)
 
 
@@ -133,8 +137,35 @@ class ResolveAmendmentsResponse(BaseModel):
     unmatched_amendment_text: list[str]
 
 
+class OcrPdfRequest(BaseModel):
+    filename: str = Field(default="uploaded.pdf", max_length=255)
+    content_base64: str = Field(default="", max_length=20_000_000)
+
+
+class OcrPdfResponse(BaseModel):
+    filename: str
+    text: str
+    page_count: int
+
+
+class JointDocument(BaseModel):
+    name: str = Field(default="", max_length=255)
+    text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
+
+
+class JointSummaryRequest(BaseModel):
+    documents: list[JointDocument] = Field(default_factory=list, max_length=5)
+
+
+class JointSummaryResponse(BaseModel):
+    summary: str
+    key_points: list[str]
+    differences: list[str]
+    document_count: int
+
+
 class OutlineRequest(BaseModel):
-    document_text: str = Field(default="", max_length=100_000)
+    document_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
 
 
 class OutlineNode(BaseModel):
@@ -164,7 +195,7 @@ class ComplianceRequirement(BaseModel):
 
 class ComplianceMatrixRequest(BaseModel):
     requirements: list[ComplianceRequirement] = Field(default_factory=list)
-    proposal_text: str = Field(default="", max_length=100_000)
+    proposal_text: str = Field(default="", max_length=MAX_DOCUMENT_TEXT_LENGTH)
 
 
 class ComplianceRow(BaseModel):
@@ -242,6 +273,26 @@ async def resolve_rfp_amendments(request: ResolveAmendmentsRequest) -> ResolveAm
         [amendment.model_dump() for amendment in request.amendments],
     )
     return ResolveAmendmentsResponse(**result)
+
+
+@app.post("/ocr-pdf", response_model=OcrPdfResponse)
+async def ocr_pdf(request: OcrPdfRequest) -> OcrPdfResponse:
+    try:
+        result = await asyncio.to_thread(mistral_ocr_pdf, request.filename, request.content_base64)
+        return OcrPdfResponse(**result)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/joint-summary", response_model=JointSummaryResponse)
+async def joint_summary(request: JointSummaryRequest) -> JointSummaryResponse:
+    try:
+        documents = [document.model_dump() for document in request.documents]
+        result, _mode = await create_joint_summary(documents)
+        document_count = len([document for document in documents if document.get("text", "").strip()])
+        return JointSummaryResponse(**result, document_count=document_count)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/reconstruct-outline", response_model=OutlineResponse)

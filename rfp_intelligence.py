@@ -48,6 +48,23 @@ Rules:
 """
 
 
+JOINT_SUMMARY_SYSTEM_PROMPT = """You explain RFPs and amendments in plain English for non-technical readers.
+Create a joint summary from two or more procurement documents.
+
+Return ONLY a JSON object in this exact shape:
+{"summary":"Plain English summary of what the documents are asking for together.","key_points":["Important combined point."],"differences":["Important change, conflict, or update between documents."]}
+
+Rules:
+- Treat later documents as amendments, addenda, updates, or related RFP files when that is reasonable from context.
+- Explain what the buyer wants, what vendors must do, important deadlines, evaluation factors, and major compliance risks.
+- Translate acronyms and jargon into their meaning instead of repeating unexplained abbreviations.
+- If documents disagree, state the difference clearly and say it needs review.
+- Do not invent details that are not in the documents.
+- Keep the wording simple and useful for an internship demo.
+- Do not add markdown or text outside the JSON object.
+"""
+
+
 SECTION_VARIANTS = {
     "SCOPE OF WORK": {
         "scope",
@@ -340,11 +357,58 @@ def _openrouter_search_clauses(text: str, query: str, top_k: int) -> list[dict[s
     return _clean_matches(parsed.get("matches", []), requested)
 
 
+def mistral_ocr_pdf(filename: str, content_base64: str) -> dict[str, Any]:
+    """Extract text from a PDF using Mistral OCR."""
+    load_dotenv()
+    api_key = os.getenv("MISTRAL_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Mistral API key is not configured. Add MISTRAL_API_KEY and restart the app.")
+
+    clean_base64 = re.sub(r"\s+", "", content_base64)
+    if not clean_base64:
+        raise RuntimeError("The uploaded PDF did not contain readable file data.")
+
+    payload = {
+        "model": os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest").strip() or "mistral-ocr-latest",
+        "document": {
+            "type": "document_url",
+            "document_url": f"data:application/pdf;base64,{clean_base64}",
+        },
+        "include_image_base64": False,
+    }
+    request = urllib.request.Request(
+        "https://api.mistral.ai/v1/ocr",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code == 401:
+            raise RuntimeError("Mistral rejected the OCR API key. Check MISTRAL_API_KEY in .env or Vercel.") from exc
+        if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+            raise RuntimeError("Mistral OCR is rate-limiting requests. Please try again shortly.") from exc
+        raise RuntimeError("Mistral OCR could not read this PDF. Please try again.") from exc
+
+    pages = body.get("pages", [])
+    page_text = [
+        str(page.get("markdown") or page.get("text") or "").strip()
+        for page in pages
+        if isinstance(page, dict) and str(page.get("markdown") or page.get("text") or "").strip()
+    ]
+    text = "\n\n".join(page_text).strip()
+    if not text:
+        raise RuntimeError("Mistral OCR finished, but no readable text was found in the PDF.")
+    return {"filename": filename.strip() or "uploaded.pdf", "text": text, "page_count": len(pages)}
+
+
 async def analyze_rfp_sections(text: str) -> tuple[list[dict[str, Any]], str]:
     """Return RFP sections using OpenRouter when configured, otherwise local rules."""
     if not text.strip():
         return [], "local"
-    load_dotenv(override=True)
+    load_dotenv()
     if os.getenv("GLOSSARY_MODE", "").strip().lower() == "local":
         return segment_rfp_text(text), "local"
     if os.getenv("OPENROUTER_API_KEY", "").strip():
@@ -892,3 +956,119 @@ def build_compliance_matrix(requirements: list[dict[str, Any]], proposal_text: s
         "mandatory_requirements_total": mandatory_total,
         "overall_flag": overall_flag,
     }
+
+
+def _clean_joint_summary(data: dict[str, Any]) -> dict[str, Any]:
+    summary = re.sub(r"\s+", " ", str(data.get("summary", "")).strip())
+    key_points = [
+        re.sub(r"\s+", " ", str(item).strip())
+        for item in data.get("key_points", [])
+        if str(item).strip()
+    ][:8]
+    differences = [
+        re.sub(r"\s+", " ", str(item).strip())
+        for item in data.get("differences", [])
+        if str(item).strip()
+    ][:8]
+    return {"summary": summary, "key_points": key_points, "differences": differences}
+
+
+def _important_sentences(text: str, limit: int = 5) -> list[str]:
+    signals = (
+        "shall",
+        "must",
+        "required",
+        "due",
+        "deadline",
+        "submit",
+        "proposal",
+        "evaluate",
+        "insurance",
+        "amend",
+        "revised",
+        "addendum",
+    )
+    selected: list[str] = []
+    for sentence in _split_sentences(text):
+        lower = sentence.lower()
+        if any(signal in lower for signal in signals):
+            selected.append(sentence)
+        if len(selected) >= limit:
+            break
+    return selected or _split_sentences(text)[:limit]
+
+
+def _extract_dates_and_amounts(text: str) -> set[str]:
+    dates = re.findall(
+        r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    money = re.findall(r"\$\s?\d[\d,]*(?:\.\d{2})?", text)
+    return {item.strip() for item in dates + money if item.strip()}
+
+
+def _local_joint_summary(documents: list[dict[str, str]]) -> dict[str, Any]:
+    usable = [doc for doc in documents if doc.get("text", "").strip()]
+    if not usable:
+        return {"summary": "", "key_points": [], "differences": []}
+
+    if len(usable) == 1:
+        summary = "In plain English: this document explains what the buyer is asking vendors to provide and what must be included in the proposal."
+    else:
+        summary = (
+            "In plain English: these documents should be read together. The first document appears to be the main request, "
+            "and the later document or documents appear to add, update, or clarify requirements that vendors need to follow."
+        )
+
+    key_points: list[str] = []
+    for doc in usable:
+        name = doc.get("name") or "Document"
+        for sentence in _important_sentences(doc["text"], limit=2):
+            key_points.append(f"{name}: {sentence}")
+    key_points = key_points[:8]
+
+    differences: list[str] = []
+    if len(usable) >= 2:
+        first_values = _extract_dates_and_amounts(usable[0]["text"])
+        for doc in usable[1:]:
+            later_values = _extract_dates_and_amounts(doc["text"])
+            new_values = sorted(later_values - first_values)
+            if new_values:
+                differences.append(f"{doc.get('name') or 'Later document'} includes these changed or additional dates/amounts: {', '.join(new_values)}.")
+        amendment_sentences = [
+            sentence
+            for doc in usable[1:]
+            for sentence in _important_sentences(doc["text"], limit=3)
+            if re.search(r"\b(?:revised|modified|struck|deleted|added|amendment|addendum)\b", sentence, re.IGNORECASE)
+        ]
+        differences.extend(amendment_sentences[:4])
+    if not differences and len(usable) >= 2:
+        differences.append("No obvious deadline, dollar amount, or section-change conflict was found by the local checker.")
+
+    return {"summary": summary, "key_points": key_points, "differences": differences[:8]}
+
+
+async def create_joint_summary(documents: list[dict[str, str]]) -> tuple[dict[str, Any], str]:
+    """Create one plain-English summary across multiple RFP documents."""
+    clean_documents = [
+        {
+            "name": re.sub(r"\s+", " ", str(document.get("name", "")).strip()) or f"Document {index}",
+            "text": str(document.get("text", "")).strip(),
+        }
+        for index, document in enumerate(documents, start=1)
+        if str(document.get("text", "")).strip()
+    ][:5]
+    if not clean_documents:
+        return {"summary": "", "key_points": [], "differences": []}, "local"
+
+    load_dotenv()
+    if os.getenv("GLOSSARY_MODE", "").strip().lower() == "local":
+        return _local_joint_summary(clean_documents), "local"
+    if os.getenv("OPENROUTER_API_KEY", "").strip():
+        user_content = json.dumps({"documents": clean_documents}, ensure_ascii=False)
+        parsed = await asyncio.to_thread(_openrouter_json, JOINT_SUMMARY_SYSTEM_PROMPT, user_content, 3500)
+        clean = _clean_joint_summary(parsed)
+        if clean["summary"]:
+            return clean, "openrouter"
+    return _local_joint_summary(clean_documents), "local"

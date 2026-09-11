@@ -20,7 +20,7 @@
     <section class="hero">
       <p class="eyebrow">easy to understand</p>
       <h1>Extract RFP language<br>into <em>clear terms.</em></h1>
-      <p class="lede">Paste government procurement text below. We’ll summarize it, explain jargon, split it into sections, and help you find the most relevant clauses.</p>
+      <p class="lede">Paste government procurement text below or upload RFP PDFs. We’ll summarize the documents, explain jargon, split sections, and help you find the most relevant clauses.</p>
     </section>
 
     <section class="workspace" aria-label="Glossary extractor">
@@ -28,12 +28,18 @@
         <div class="panel-heading">
           <div>
             <span class="step">01</span>
-            <h2>Paste your RFP</h2>
+            <h2>Paste or upload your RFP</h2>
           </div>
           <button id="sampleButton" class="text-button" type="button">Use example</button>
         </div>
         <label class="sr-only" for="rfpText">RFP document text</label>
-        <textarea id="rfpText" maxlength="100000" placeholder="Paste RFP text here."></textarea>
+        <textarea id="rfpText" maxlength="300000" placeholder="Paste RFP text here, or upload PDFs and click Read PDFs."></textarea>
+        <div class="upload-row">
+          <label class="file-picker" for="pdfFiles">Choose PDF files</label>
+          <input id="pdfFiles" type="file" accept="application/pdf" multiple>
+          <button id="ocrButton" class="text-button" type="button">Read PDFs</button>
+        </div>
+        <p id="documentStatus" class="muted-note">You can upload one RFP PDF, or upload two PDFs to make a joint summary.</p>
         <div class="input-footer">
           <span id="charCount">0 characters</span>
           <button id="analyzeButton" class="primary-button" type="button">
@@ -45,11 +51,12 @@
       <div class="output-panels">
         <div class="summary-panel" aria-live="polite">
           <div class="panel-heading">
-            <div>
-              <span class="step">02</span>
-              <h2>Your Summary</h2>
-            </div>
+          <div>
+            <span class="step">02</span>
+            <h2>Your Summary</h2>
           </div>
+          <button id="individualSummaryButton" class="text-button" type="button">Individual summaries</button>
+        </div>
           <div id="summary" class="summary empty-state">
             <div class="empty-icon" aria-hidden="true">✦</div>
             <h3>Summary appears here</h3>
@@ -126,17 +133,15 @@
       <div class="feature-card">
         <div class="panel-heading">
           <div>
-            <h2>Amendment resolver</h2>
+            <h2>Joint summary</h2>
           </div>
-          <span id="amendmentCount" class="term-count">0 changes</span>
+          <span id="amendmentCount" class="term-count">0 docs</span>
         </div>
-        <p class="feature-help">Uses the pasted RFP as the original document, then applies amendment text to show the current effective clauses.</p>
-        <label class="sr-only" for="amendmentText">Amendment text</label>
-        <textarea id="amendmentText" class="mini-textarea" placeholder="Paste amendment text here. Example: Amendment 1: Section 2 (Submission Requirements) is revised to read: 'Proposals are due July 15, 2026.'"></textarea>
-        <button id="amendmentButton" class="primary-button inline-action" type="button"><span>Resolve amendments</span><b aria-hidden="true">→</b></button>
+        <p class="feature-help">Uses the PDF text after OCR. Upload the original RFP and addendum/amendment, click Read PDFs, then create one OpenRouter summary from both documents.</p>
+        <button id="amendmentButton" class="primary-button inline-action" type="button"><span>Create joint summary</span><b aria-hidden="true">→</b></button>
         <div id="amendmentOutput" class="tool-output empty-state compact-empty">
-          <h3>No amendments resolved yet</h3>
-          <p>Paste amendment language to see what changed.</p>
+          <h3>No joint summary yet</h3>
+          <p>Upload the original RFP and addendum PDFs to summarize them together.</p>
         </div>
       </div>
 
@@ -175,6 +180,6 @@
   </main>
 
   <footer><span>ClearTerms</span><span>Built for people who read the fine print.</span></footer>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=20260910-openrouter" defer></script>
 </body>
 </html>

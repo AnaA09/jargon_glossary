@@ -1,6 +1,6 @@
 # jargon_glossary
 
-A FastAPI service and ClearTerms browser interface that summarizes RFP text, finds procurement acronyms, splits RFPs into sections, searches relevant clauses, answers RFP questions, extracts vendor requirement checklists, resolves amendments, reconstructs outlines, and builds proposal compliance matrices. Duplicate glossary terms are removed automatically.
+A FastAPI service and ClearTerms browser interface that summarizes RFP text, reads uploaded RFP PDFs with OCR, finds procurement acronyms, splits RFPs into sections, searches relevant clauses, answers RFP questions, extracts vendor requirement checklists, creates joint summaries across multiple RFP/amendment documents, reconstructs outlines, and builds proposal compliance matrices. Duplicate glossary terms are removed automatically.
 
 ## Run locally
 
@@ -30,6 +30,15 @@ pip install sentence-transformers
 ```
 
 If `sentence-transformers` is not installed yet, the endpoint still works with a lightweight local similarity fallback.
+
+To read uploaded PDFs, add a Mistral key to `.env`. The PDF text is extracted by Mistral OCR, then summaries are written from that extracted text using OpenRouter when `OPENROUTER_API_KEY` is configured.
+
+```text
+MISTRAL_API_KEY=your-mistral-key-here
+MISTRAL_OCR_MODEL=mistral-ocr-latest
+```
+
+Restart the app after changing `.env`. The project calls Mistral through HTTPS directly, so no extra Python package is required for OCR.
 
 ## Example API request
 
@@ -140,7 +149,48 @@ Example response:
 }
 ```
 
-## Amendment resolver
+## PDF OCR
+
+Reads one uploaded PDF and returns extracted text. The browser calls this endpoint once per selected PDF when you choose multiple PDF files and click **Read PDFs**. The extracted text is shown in the main text box with each document separated by its PDF filename.
+
+```bash
+curl -X POST http://localhost:8000/ocr-pdf \
+  -H "Content-Type: application/json" \
+  -d '{"filename":"rfp.pdf","content_base64":"BASE64_PDF_CONTENT_HERE"}'
+```
+
+Example response:
+
+```json
+{
+  "filename": "rfp.pdf",
+  "text": "Extracted RFP text...",
+  "page_count": 3
+}
+```
+
+## Joint summary / amendment resolver
+
+Combines uploaded PDF documents, usually the original RFP plus an addendum or amendment, and summarizes the documents together in plain English. Mistral is only used to turn PDFs into text. The joint summary uses OpenRouter when `OPENROUTER_API_KEY` is configured; otherwise it falls back to a local demo summary.
+
+```bash
+curl -X POST http://localhost:8000/joint-summary \
+  -H "Content-Type: application/json" \
+  -d '{"documents":[{"name":"Original RFP","text":"The vendor must submit proposals by August 15, 2026."},{"name":"Amendment 1","text":"The due date is revised to July 15, 2026."}]}'
+```
+
+Example response:
+
+```json
+{
+  "summary": "In plain English: these documents should be read together...",
+  "key_points": ["Original RFP: The vendor must submit proposals by August 15, 2026."],
+  "differences": ["Amendment 1 includes these changed or additional dates/amounts: July 15, 2026."],
+  "document_count": 2
+}
+```
+
+## Legacy amendment resolver API
 
 Applies dated amendments to the original RFP text. Later amendments win when they touch the same section.
 
@@ -182,5 +232,18 @@ Never commit `.env`; it is excluded by `.gitignore`.
 ## Deploy to Vercel
 
 Vercel uses `app.py` as the serverless FastAPI entrypoint. Import the repository in
-Vercel, leave the framework and build settings on their defaults, and add
-`OPENROUTER_API_KEY` plus `OPENROUTER_MODEL` in the project's Environment Variables.
+Vercel, leave the framework and build settings on their defaults, and add the keys
+you use in the project's Environment Variables.
+
+Recommended variables:
+
+```text
+OPENROUTER_API_KEY=your-openrouter-key-here
+OPENROUTER_MODEL=openrouter/auto
+MISTRAL_API_KEY=your-mistral-key-here
+MISTRAL_OCR_MODEL=mistral-ocr-latest
+APP_URL=https://your-vercel-site.vercel.app
+```
+
+After adding or changing Vercel environment variables, redeploy the project so the
+new values are available to the live site.
